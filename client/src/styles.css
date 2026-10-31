@@ -50,7 +50,7 @@ button { color: inherit; }
 .section-wrap { width: min(100%, 1220px); margin: 0 auto; }
 .site-backdrop { position: fixed; z-index: 0; inset: 0; overflow: hidden; background: #10180e; pointer-events: none; }
 .site-backdrop::after { content: ''; position: absolute; inset: 0; background: rgba(246, 245, 240, .52); }
-.site-backdrop-video, .site-backdrop-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: brightness(.78) saturate(.9); }
+.site-backdrop-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: brightness(.78) saturate(.9); }
 .site-content { position: relative; z-index: 1; }
 .topline { height: 35px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); font: 10px var(--mono); letter-spacing: 0; color: #55574e; text-transform: uppercase; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #78a847; box-shadow: 0 0 0 3px #78a84720; }

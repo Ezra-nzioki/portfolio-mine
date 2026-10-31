@@ -18,6 +18,12 @@ npm run dev --prefix client
 
 Open the Vite URL shown in the terminal. The client proxies `/api` requests to the backend on port 4000. The admin workspace is at `/admin`; local credentials are configured in the ignored `backend/.env` file.
 
+## Deploying the frontend
+
+The production client always sends API requests to `https://portfoliobackend-toht.onrender.com`, even if `VITE_API_URL` is set in the frontend host's build environment. Local development can use `VITE_API_URL` or the Vite proxy to `http://localhost:4000`.
+
+On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. If the frontend and API use different site domains and admin sign-in needs cross-site cookies, set `ADMIN_COOKIE_SAME_SITE=none`; production cookies are marked `Secure`.
+
 ## MongoDB persistence
 
 Set `MONGODB_URI` in `backend/.env` to a MongoDB connection string. The API connects to the `portfolio` database before accepting requests. Add the development machine's outbound IP to Atlas Network Access; this workspace currently exits as `4.240.18.224/32` (the address may change). If Atlas is unavailable, `/api/health` reports `storage: unavailable` and database-backed reads and writes return an error instead of appearing to save. Without `MONGODB_URI`, local preview uses in-memory storage.
@@ -34,9 +40,9 @@ Project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP
 
 The starter project entries are sample content. Update the profile and projects in the admin workspace before publishing.
 
-## Motion and background video
+## Performance and motion
 
-The portfolio uses subtle scroll-triggered section movement and a muted, looping low-resolution technology video as a fixed background across the entire page. A light overlay keeps text readable. The video is hosted by Pexels and loads only in browsers where reduced motion is not enabled; a static poster is shown otherwise. Replace the video URL and poster in `client/src/App.jsx` with assets you have permission to use. The layout crops the media to fit desktop and mobile screens.
+The portfolio uses a static background image rather than autoplaying video to reduce network use and decoding work. Scroll-triggered movement respects the reduced-motion preference. The hero image is resized and compressed at its image host, and project cover images load as needed while scrolling.
 
 The visual palette uses midnight navy (`#0b132b`), teal (`#5BC0BE`), orange (`#F96900`), and deep plum (`#171123`).
 

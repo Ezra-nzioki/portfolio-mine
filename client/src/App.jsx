@@ -35,8 +35,11 @@ import {
 const CONTACT_PHONE = '+254710865376';
 const CONTACT_PHONE_DISPLAY = '+254 710 865 376';
 const CONTACT_EMAIL = 'ezranzioki@gmail.com';
-const HERO_POSTER = 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1400&q=85';
-const HERO_VIDEO = 'https://videos.pexels.com/video-files/3130284/3130284-sd_640_360_30fps.mp4';
+const HERO_POSTER = 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=75';
+const API_BASE_URL = (import.meta.env.PROD
+  ? 'https://portfoliobackend-toht.onrender.com'
+  : import.meta.env.VITE_API_URL || ''
+).replace(/\/+$/, '');
 
 const emptyPortfolio = {
   profile: {
@@ -54,7 +57,7 @@ const emptyPortfolio = {
 };
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     ...options,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...options.headers },
@@ -63,6 +66,11 @@ async function api(path, options = {}) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Something went wrong.');
   return data;
+}
+
+function apiUrl(path) {
+  if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(path)) return path;
+  return `${API_BASE_URL}${path}`;
 }
 
 function getKenyanGreeting() {
@@ -99,10 +107,10 @@ function PortfolioPage({ portfolio, loading, loadError }) {
   const { profile, projects } = portfolio;
   const [menuOpen, setMenuOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
-  const [scrollProgress, setScrollProgress] = useState(0);
   const [contact, setContact] = useState({ name: '', email: '', message: '' });
   const [contactState, setContactState] = useState({ busy: false, message: '' });
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const progressBarRef = useRef(null);
 
   useEffect(() => {
     const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -130,7 +138,11 @@ function PortfolioPage({ portfolio, loading, loadError }) {
       frame = requestAnimationFrame(() => {
         const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight;
         const progress = scrollableHeight > 0 ? (window.scrollY / scrollableHeight) * 100 : 0;
-        setScrollProgress(Math.min(100, Math.max(0, progress)));
+        const boundedProgress = Math.min(100, Math.max(0, progress));
+        if (progressBarRef.current) {
+          progressBarRef.current.style.transform = `scaleX(${boundedProgress / 100})`;
+          progressBarRef.current.parentElement?.setAttribute('aria-valuenow', String(Math.round(boundedProgress)));
+        }
       });
     }
 
@@ -184,17 +196,11 @@ function PortfolioPage({ portfolio, loading, loadError }) {
   return (
     <main className="site-shell">
       <div className="site-backdrop" aria-hidden="true">
-        {prefersReducedMotion ? (
-          <img className="site-backdrop-poster" src={HERO_POSTER} alt="" />
-        ) : (
-          <video className="site-backdrop-video" autoPlay loop muted playsInline preload="none" poster={HERO_POSTER} tabIndex="-1">
-            <source src={HERO_VIDEO} type="video/mp4" />
-          </video>
-        )}
+        <img className="site-backdrop-poster" src={HERO_POSTER} alt="" />
       </div>
       <div className="site-content">
-      <div className="reading-progress" role="progressbar" aria-label="Page reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(scrollProgress)}>
-        <span style={{ transform: `scaleX(${scrollProgress / 100})` }} />
+      <div className="reading-progress" role="progressbar" aria-label="Page reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <span ref={progressBarRef} />
       </div>
       <div className="topline"><span className="status-dot" /> {profile.availability || 'Open to select projects'} <span className="topline-place">Based in {profile.location || 'Nairobi, Kenya'}</span></div>
       <header className="site-header">
@@ -340,14 +346,20 @@ function createCircuitState(level = 0, lives = 3, status = 'ready') {
 
 function CircuitBreakGame() {
   const [game, setGame] = useState(() => createCircuitState());
+  const [gamepadConnected, setGamepadConnected] = useState(false);
   const boardRef = useRef(null);
+  const gameRef = useRef(game);
+  const movePlayerRef = useRef(null);
+  const startGameRef = useRef(null);
   const level = CIRCUIT_LEVELS[game.level];
   const isPlaying = game.status === 'playing';
+  gameRef.current = game;
 
   function startGame() {
     setGame({ ...createCircuitState(), status: 'playing', message: 'Collect every data fragment, avoid the patrol, then reach the exit.' });
     boardRef.current?.focus();
   }
+  startGameRef.current = startGame;
 
   function movePlayer(dx, dy) {
     if (!isPlaying) return;
@@ -391,6 +403,68 @@ function CircuitBreakGame() {
       return nextState;
     });
   }
+  movePlayerRef.current = movePlayer;
+
+  useEffect(() => {
+    let nextMoveAt = 0;
+    let previousDirection = '';
+    let previousStartPressed = false;
+    let wasConnected = false;
+
+    function pollGamepad() {
+      const timestamp = performance.now();
+      const pads = navigator.getGamepads?.();
+      const gamepad = pads ? Array.from(pads).find((pad) => pad?.connected) : null;
+      const connected = Boolean(gamepad);
+      if (connected !== wasConnected) {
+        wasConnected = connected;
+        setGamepadConnected(connected);
+      }
+
+      if (!gamepad) {
+        previousDirection = '';
+        previousStartPressed = false;
+        return;
+      }
+
+      const buttons = gamepad.buttons;
+      const startPressed = Boolean(buttons[0]?.pressed);
+      if (startPressed && !previousStartPressed && gameRef.current.status !== 'playing') {
+        startGameRef.current?.();
+      }
+      previousStartPressed = startPressed;
+
+      let direction = '';
+      if (buttons[12]?.pressed) direction = 'up';
+      else if (buttons[13]?.pressed) direction = 'down';
+      else if (buttons[14]?.pressed) direction = 'left';
+      else if (buttons[15]?.pressed) direction = 'right';
+      else {
+        const [x = 0, y = 0] = gamepad.axes;
+        if (Math.abs(x) > Math.abs(y) && Math.abs(x) > 0.55) direction = x < 0 ? 'left' : 'right';
+        else if (Math.abs(y) > 0.55) direction = y < 0 ? 'up' : 'down';
+      }
+
+      if (!direction) {
+        previousDirection = '';
+        return;
+      }
+      if (direction !== previousDirection || timestamp >= nextMoveAt) {
+        const movement = {
+          up: [0, -1],
+          down: [0, 1],
+          left: [-1, 0],
+          right: [1, 0],
+        }[direction];
+        movePlayerRef.current?.(...movement);
+        nextMoveAt = timestamp + 180;
+      }
+      previousDirection = direction;
+    }
+
+    const interval = window.setInterval(pollGamepad, 80);
+    return () => window.clearInterval(interval);
+  }, []);
 
   function handleBoardKeyDown(event) {
     const directions = {
@@ -419,7 +493,7 @@ function CircuitBreakGame() {
       <div className="circuit-console">
         <div className="console-topline"><span><i /> SECURE CONNECTION</span><span>{level.name} <b>·</b> MOVES {game.moves.toString().padStart(2, '0')}</span></div>
         <div className={`circuit-board-wrap${isPlaying ? ' is-live' : ''}`}>
-          <div className="circuit-board" role="grid" aria-label={`${level.name} maze. Use arrow keys or WASD to move.`} tabIndex={0} ref={boardRef} onKeyDown={handleBoardKeyDown}>
+          <div className="circuit-board" role="grid" aria-label={`${level.name} maze. Use arrow keys, WASD, or a connected gamepad to move.`} tabIndex={0} ref={boardRef} onKeyDown={handleBoardKeyDown}>
             {level.map.map((row, y) => [...row].map((tile, x) => {
               const key = `${x},${y}`;
               const isPlayer = game.player.x === x && game.player.y === y;
@@ -443,7 +517,7 @@ function CircuitBreakGame() {
             </div>
           )}
         </div>
-        <div className="console-bottomline"><span className="game-live-status" aria-live="polite">{game.message || (isPlaying ? 'OPERATOR ONLINE · MOVE WITH WASD OR ARROW KEYS' : 'AWAITING OPERATOR INPUT')}</span><span>{isPlaying ? 'PATROL ACTIVE' : 'SYSTEM STANDBY'}</span></div>
+        <div className="console-bottomline"><span className="game-live-status" aria-live="polite">{game.message || (isPlaying ? 'OPERATOR ONLINE · MOVE WITH WASD OR ARROW KEYS' : 'AWAITING OPERATOR INPUT')}</span><span>{gamepadConnected ? 'GAMEPAD ONLINE' : isPlaying ? 'PATROL ACTIVE' : 'SYSTEM STANDBY'}</span></div>
       </div>
       <div className="circuit-controls" aria-label="Movement controls">
         <div className="dpad">
@@ -454,7 +528,7 @@ function CircuitBreakGame() {
         </div>
         <span>WASD / ARROWS <i /> D-PAD / TOUCH</span>
       </div>
-      <p className="game-hint">Every move advances the patrol. Plan your route before you move.</p>
+      <p className="game-hint">{gamepadConnected ? 'CONTROLLER CONNECTED · D-PAD / LEFT STICK TO MOVE · A TO START' : 'KEYBOARD: WASD / ARROWS · CONTROLLER: CONNECT AND PRESS ANY BUTTON'}<br />Every move advances the patrol. Plan your route before you move.</p>
     </section>
   );
 }
@@ -624,10 +698,11 @@ function CommandPalette({ open, onOpenChange, profile, projects }) {
 
 function ProjectCard({ project, index }) {
   const artClasses = ['art-lime', 'art-coral', 'art-blue'];
+  const projectImage = project.image ? apiUrl(project.image) : '';
   return (
     <article className="project-card" id={`project-${project.id || index}`}>
       <div className={`project-visual ${artClasses[index % artClasses.length]}${project.image ? ' has-image' : ''}`}>
-        {project.image ? <img className="project-cover-image" src={project.image} alt={`${project.name} project`} loading="lazy" /> : <>
+        {projectImage ? <img className="project-cover-image" src={projectImage} alt={`${project.name} project`} loading="lazy" /> : <>
           {index === 0 && <div className="visual-notes"><span>01 / COLLECT</span><span>02 / CONNECT</span><span>03 / CREATE</span><strong>FIELD<br />NOTES<span>.</span></strong><div className="notes-grid" /></div>}
           {index === 1 && <div className="visual-ledger"><div className="ledger-top"><span>OPEN / LEDGER</span><span>•••</span></div><div className="ledger-label">TOTAL BALANCE</div><div className="ledger-number">$24,680<span>.50</span></div><div className="ledger-chart"><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /><i /></div><div className="ledger-bottom"><span>INCOME <b>+$5,200</b></span><span>SPEND <b>-$1,840</b></span></div></div>}
           {index === 2 && <div className="visual-common"><div className="common-orbit orbit-a" /><div className="common-orbit orbit-b" /><span>MAKE SPACE<br />FOR EVERYONE.</span><div className="common-star">✳</div><small>COMMON GROUND / COMMUNITY</small></div>}
@@ -715,7 +790,7 @@ function Admin() {
     try {
       const formData = new FormData();
       formData.append('image', file);
-      const response = await fetch('/api/admin/uploads', { method: 'POST', credentials: 'include', body: formData });
+      const response = await fetch(apiUrl('/api/admin/uploads'), { method: 'POST', credentials: 'include', body: formData });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Image upload failed.');
       updateProject(id, 'image', result.url);

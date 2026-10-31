@@ -14,6 +14,8 @@ const app = express();
 const port = process.env.PORT || 4000;
 const tokenSecret = process.env.JWT_SECRET || require('node:crypto').randomBytes(32).toString('hex');
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
+const frontendOrigins = new Set((process.env.FRONTEND_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean));
+const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE === 'none' ? 'none' : 'strict';
 const uploadDirectory = path.join(__dirname, 'uploads');
 const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -77,6 +79,28 @@ const Message = mongoose.model('Message', new mongoose.Schema({
 }));
 
 app.disable('x-powered-by');
+app.use((req, res, next) => {
+  const origin = req.get('Origin');
+  const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0];
+  const requestOrigin = `${forwardedProto || req.protocol}://${req.get('host')}`;
+  const isLocalDevelopmentOrigin = process.env.NODE_ENV !== 'production'
+    && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || '');
+
+  if (origin && origin !== requestOrigin && !frontendOrigins.has(origin) && !isLocalDevelopmentOrigin) {
+    return res.status(403).json({ error: 'This website is not allowed to access the API.' });
+  }
+  if (origin) {
+    res.vary('Origin');
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Credentials', 'true');
+  }
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    return res.sendStatus(204);
+  }
+  return next();
+});
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
@@ -161,14 +185,14 @@ app.post('/api/admin/login', async (req, res) => {
   res.cookie('ezra_admin', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: adminCookieSameSite,
     maxAge: 12 * 60 * 60 * 1000,
   });
   return res.json({ username });
 });
 
 app.post('/api/admin/logout', (_req, res) => {
-  res.clearCookie('ezra_admin', { httpOnly: true, sameSite: 'strict', secure: process.env.NODE_ENV === 'production' });
+  res.clearCookie('ezra_admin', { httpOnly: true, sameSite: adminCookieSameSite, secure: process.env.NODE_ENV === 'production' });
   res.status(204).end();
 });
 
