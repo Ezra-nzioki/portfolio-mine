@@ -273,7 +273,7 @@ async function startServer() {
       console.error('MongoDB unavailable; using temporary in-memory storage. Check the URI and Atlas network access.');
     }
   }
-  app.listen(port, () => console.log(`Portfolio API listening on http://localhost:${port}`));
+  app.listen(port, () => console.log(`Portfolio API listening today on http://localhost:${port}`));
 }
 
 startServer();
