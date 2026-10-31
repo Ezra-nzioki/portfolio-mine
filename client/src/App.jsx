@@ -36,7 +36,7 @@ const CONTACT_PHONE = '+254710865376';
 const CONTACT_PHONE_DISPLAY = '+254 710 865 376';
 const CONTACT_EMAIL = 'ezranzioki@gmail.com';
 const HERO_POSTER = 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=75';
-const API_BASE_URL = (import.meta.env.VITE_API_URL || (import.meta.env.PROD
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD
   ? 'https://portfoliobackend-toht.onrender.com'
   : ''
 )).replace(/\/+$/, '');
