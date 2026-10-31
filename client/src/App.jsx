@@ -57,14 +57,27 @@ const emptyPortfolio = {
 };
 
 async function api(path, options = {}) {
+  const headers = { ...options.headers };
+  if (options.body !== undefined && !Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')) {
+    headers['Content-Type'] = 'application/json';
+  }
   const response = await fetch(apiUrl(path), {
     ...options,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers,
   });
   if (response.status === 204) return null;
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+  const responseText = await response.text();
+  let data;
+  try {
+    data = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    if (!response.ok) {
+      throw new Error(`API request failed (${response.status}) at ${response.url}: ${responseText.trim().slice(0, 200) || response.statusText}`);
+    }
+    throw new Error(`API returned a non-JSON response (${response.status}) from ${response.url}. Check the deployed API URL.`);
+  }
+  if (!response.ok) throw new Error(data?.error || 'Something went wrong.');
   return data;
 }
 
