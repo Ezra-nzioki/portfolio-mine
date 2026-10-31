@@ -22,7 +22,7 @@ Open the Vite URL shown in the terminal. The client proxies `/api` requests to t
 
 The production client reads its API base URL from `client/.env.production` (`VITE_API_BASE_URL`). Vite requires the `VITE_` prefix to expose environment variables to frontend code. The current value is `https://portfoliobackend-toht.onrender.com`. Local development can use `VITE_API_BASE_URL` or the Vite proxy to `http://localhost:4000`.
 
-On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. If the frontend and API use different site domains and admin sign-in needs cross-site cookies, set `ADMIN_COOKIE_SAME_SITE=none`; production cookies are marked `Secure`.
+On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. Production defaults admin cookies to `SameSite=None` and marks them `Secure` for separately hosted frontend and API services. Set `ADMIN_COOKIE_SAME_SITE` only if you need to override that behavior.
 
 ## MongoDB persistence
 

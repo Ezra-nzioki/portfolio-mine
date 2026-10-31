@@ -15,7 +15,7 @@ const port = process.env.PORT || 4000;
 const tokenSecret = process.env.JWT_SECRET || require('node:crypto').randomBytes(32).toString('hex');
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
 const frontendOrigins = new Set((process.env.FRONTEND_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean));
-const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE === 'none' ? 'none' : 'strict';
+const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE || (process.env.NODE_ENV === 'production' ? 'none' : 'strict');
 const cloudinaryConfigured = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
 if (cloudinaryConfigured) {
   cloudinary.config({
@@ -190,17 +190,21 @@ app.post('/api/admin/login', async (req, res) => {
     && await bcrypt.compare(req.body.password, adminPasswordHash);
   if (!valid) return res.status(401).json({ error: 'That username and password did not match.' });
   const token = jwt.sign({ username }, tokenSecret, { expiresIn: '12h' });
+  const secureCookie = process.env.NODE_ENV === 'production'
+    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
   res.cookie('ezra_admin', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureCookie,
     sameSite: adminCookieSameSite,
     maxAge: 12 * 60 * 60 * 1000,
   });
   return res.json({ username });
 });
 
-app.post('/api/admin/logout', (_req, res) => {
-  res.clearCookie('ezra_admin', { httpOnly: true, sameSite: adminCookieSameSite, secure: process.env.NODE_ENV === 'production' });
+app.post('/api/admin/logout', (req, res) => {
+  const secureCookie = process.env.NODE_ENV === 'production'
+    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
+  res.clearCookie('ezra_admin', { httpOnly: true, sameSite: adminCookieSameSite, secure: secureCookie });
   res.status(204).end();
 });
 
