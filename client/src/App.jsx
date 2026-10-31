@@ -228,7 +228,7 @@ function PortfolioPage({ portfolio, loading, loadError }) {
           <div className="hero-index"><span>01</span><span className="index-rule" /><span>SCROLL TO EXPLORE</span></div>
         </div>
         <div className="hero-art scroll-reveal">
-          <img className="hero-art-image" src={HERO_POSTER} alt="A developer working at a laptop in a bright workspace" fetchPriority="high" />
+          <img className="hero-art-image" src={apiUrl(profile.heroImage || HERO_POSTER)} alt={profile.heroImage ? `${profile.name || 'Portfolio'} hero image` : 'A developer working at a laptop in a bright workspace'} fetchPriority="high" />
           <div className="art-label"><span className="art-label-icon"><Code2 size={16} /></span><span>Building with intention</span><span className="art-label-count">01 / 04</span></div>
           <div className="art-stamp"><Sparkles size={16} /><span>GOOD<br />THINGS<br />TAKE SHAPE</span></div>
           <span className="art-caption">CODE IN MOTION — DIGITAL THINKING</span>
@@ -726,6 +726,7 @@ function Admin() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploadingProject, setUploadingProject] = useState(null);
+  const [uploadingHero, setUploadingHero] = useState(false);
 
   useEffect(() => {
     api('/api/admin/session')
@@ -776,9 +777,35 @@ function Admin() {
 
   if (!user) return <main className="admin-login-shell"><a className="wordmark login-wordmark" href="/"><span>EN</span><i>.</i></a><div className="login-panel"><span className="section-kicker">PORTFOLIO ADMIN</span><h1>Welcome<br />back, Ezra.</h1><p>Sign in to update your portfolio and view messages.</p><form onSubmit={signIn}><label>Username<input value={login.username} onChange={(event) => setLogin({ ...login, username: event.target.value })} autoComplete="username" required /></label><label>Password<input type="password" value={login.password} onChange={(event) => setLogin({ ...login, password: event.target.value })} autoComplete="current-password" required /></label><button className="admin-primary" disabled={busy}>{busy ? 'Signing in...' : 'Sign in'} <ArrowRight size={16} /></button><span className="error-text" role="alert">{error}</span></form></div><a href="/" className="back-home"><ArrowDownRight size={14} /> Back to portfolio</a></main>;
 
-  const updateProfile = (key, value) => setPortfolio({ ...portfolio, profile: { ...portfolio.profile, [key]: value } });
+  const updateProfile = (key, value) => setPortfolio((current) => ({ ...current, profile: { ...current.profile, [key]: value } }));
   const updateProject = (id, key, value) => setPortfolio((current) => ({ ...current, projects: current.projects.map((project) => project.id === id ? { ...project, [key]: value } : project) }));
   const addProject = () => setPortfolio({ ...portfolio, projects: [...portfolio.projects, { id: `project-${Date.now()}`, name: '', category: '', description: '', year: String(new Date().getFullYear()), color: '#5BC0BE', url: '' }] });
+
+  async function uploadImage(file) {
+    const formData = new FormData();
+    formData.append('image', file);
+    const response = await fetch(apiUrl('/api/admin/uploads'), { method: 'POST', credentials: 'include', body: formData });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Image upload failed.');
+    return result.url;
+  }
+
+  async function uploadHeroImage(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setUploadingHero(true);
+    setError('');
+    setNotice('');
+    try {
+      updateProfile('heroImage', await uploadImage(file));
+      setNotice('Hero image uploaded. Save changes to publish it.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setUploadingHero(false);
+    }
+  }
 
   async function uploadProjectImage(id, event) {
     const file = event.target.files?.[0];
@@ -788,12 +815,7 @@ function Admin() {
     setError('');
     setNotice('');
     try {
-      const formData = new FormData();
-      formData.append('image', file);
-      const response = await fetch(apiUrl('/api/admin/uploads'), { method: 'POST', credentials: 'include', body: formData });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Image upload failed.');
-      updateProject(id, 'image', result.url);
+      updateProject(id, 'image', await uploadImage(file));
       setNotice('Image uploaded. Save changes to publish it.');
     } catch (requestError) {
       setError(requestError.message);
@@ -801,6 +823,8 @@ function Admin() {
       setUploadingProject(null);
     }
   }
+
+  const heroImage = portfolio.profile.heroImage ? apiUrl(portfolio.profile.heroImage) : '';
 
   return (
     <main className="admin-shell">
@@ -821,9 +845,13 @@ function Admin() {
               <AdminField label="Email" value={portfolio.profile.email} onChange={(value) => updateProfile('email', value)} />
               <AdminField label="GitHub URL" value={portfolio.profile.github} onChange={(value) => updateProfile('github', value)} />
               <AdminField label="LinkedIn URL" value={portfolio.profile.linkedin} onChange={(value) => updateProfile('linkedin', value)} />
+              <div className="admin-image-control">
+                <div className="admin-image-preview">{heroImage ? <img src={heroImage} alt="Hero image preview" /> : <div><ImagePlus size={22} /><span>Default hero image</span></div>}</div>
+                <div className="admin-image-actions"><span className="image-field-label">HERO IMAGE</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingHero ? 'Uploading...' : heroImage ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploadingHero || uploadingProject !== null} onChange={uploadHeroImage} /></label>{heroImage && <button className="image-remove-button" onClick={() => updateProfile('heroImage', '')}>Use default image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div>
+              </div>
             </div>
             <div className="admin-section-title projects-admin-title"><span>02</span><div><h2>Selected work</h2><p>Show the projects you&apos;re proud of.</p></div><button className="add-project" onClick={addProject}><Plus size={16} /> Add project</button></div>
-            <div className="admin-project-list">{portfolio.projects.map((project, index) => <article className="admin-project" key={project.id}><div className="admin-project-head"><span>PROJECT 0{index + 1}</span><button aria-label={`Delete ${project.name || 'project'}`} onClick={() => setPortfolio({ ...portfolio, projects: portfolio.projects.filter((item) => item.id !== project.id) })}><Trash2 size={16} /></button></div><div className="admin-form-grid"><div className="admin-image-control"><div className="admin-image-preview">{project.image ? <img src={project.image} alt={`${project.name || 'Project'} cover preview`} /> : <div><ImagePlus size={22} /><span>No cover image</span></div>}</div><div className="admin-image-actions"><span className="image-field-label">PROJECT COVER</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingProject === project.id ? 'Uploading...' : project.image ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploadingProject !== null} onChange={(event) => uploadProjectImage(project.id, event)} /></label>{project.image && <button className="image-remove-button" onClick={() => updateProject(project.id, 'image', '')}>Remove image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div></div><AdminField label="Project name" value={project.name} onChange={(value) => updateProject(project.id, 'name', value)} /><AdminField label="Category" value={project.category} onChange={(value) => updateProject(project.id, 'category', value)} /><AdminField label="Year" value={project.year} onChange={(value) => updateProject(project.id, 'year', value)} /><AdminField label="Project URL" value={project.url} onChange={(value) => updateProject(project.id, 'url', value)} /><AdminField label="Description" value={project.description} onChange={(value) => updateProject(project.id, 'description', value)} multiline wide /></div></article>)}{!portfolio.projects.length && <div className="admin-empty">No projects yet. Add one to feature it on your site.</div>}</div>
+            <div className="admin-project-list">{portfolio.projects.map((project, index) => <article className="admin-project" key={project.id}><div className="admin-project-head"><span>PROJECT 0{index + 1}</span><button aria-label={`Delete ${project.name || 'project'}`} onClick={() => setPortfolio({ ...portfolio, projects: portfolio.projects.filter((item) => item.id !== project.id) })}><Trash2 size={16} /></button></div><div className="admin-form-grid"><div className="admin-image-control"><div className="admin-image-preview">{project.image ? <img src={apiUrl(project.image)} alt={`${project.name || 'Project'} cover preview`} /> : <div><ImagePlus size={22} /><span>No cover image</span></div>}</div><div className="admin-image-actions"><span className="image-field-label">PROJECT COVER</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingProject === project.id ? 'Uploading...' : project.image ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploadingProject !== null || uploadingHero} onChange={(event) => uploadProjectImage(project.id, event)} /></label>{project.image && <button className="image-remove-button" onClick={() => updateProject(project.id, 'image', '')}>Remove image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div></div><AdminField label="Project name" value={project.name} onChange={(value) => updateProject(project.id, 'name', value)} /><AdminField label="Category" value={project.category} onChange={(value) => updateProject(project.id, 'category', value)} /><AdminField label="Year" value={project.year} onChange={(value) => updateProject(project.id, 'year', value)} /><AdminField label="Project URL" value={project.url} onChange={(value) => updateProject(project.id, 'url', value)} /><AdminField label="Description" value={project.description} onChange={(value) => updateProject(project.id, 'description', value)} multiline wide /></div></article>)}{!portfolio.projects.length && <div className="admin-empty">No projects yet. Add one to feature it on your site.</div>}</div>
             <div className="admin-save-bar"><span className="save-notice" role="status">{notice || error}</span><button className="admin-primary save-button" onClick={save} disabled={busy}><Save size={16} /> {busy ? 'Saving...' : 'Save changes'} <Check size={15} /></button></div>
           </> : <>
             <div className="admin-page-title"><div><span className="section-kicker">CONTACT FORM</span><h1>Your messages</h1><p>Notes sent through your portfolio.</p></div><span className="inbox-total">{messages.length} {messages.length === 1 ? 'MESSAGE' : 'MESSAGES'}</span></div>

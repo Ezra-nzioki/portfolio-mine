@@ -36,7 +36,7 @@ node -e "console.log(require('./backend/node_modules/bcryptjs').hashSync('your-p
 
 Build the client with `npm run build --prefix client`; then start the API with `npm start --prefix backend`. Express serves the built client from `client/dist`.
 
-Project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP, or GIF files up to 5 MB. Files are stored in `backend/uploads`; production deployments should mount persistent storage there because MongoDB stores the image URL, not the image file itself.
+Hero and project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP, or GIF files up to 5 MB. Files are stored in `backend/uploads`; production deployments should mount persistent storage there because MongoDB stores the image URL, not the image file itself.
 
 The starter project entries are sample content. Update the profile and projects in the admin workspace before publishing.
 
