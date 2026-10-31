@@ -16,7 +16,7 @@ In a second terminal, start the Vite client:
 npm run dev --prefix client
 ```
 
-Open the Vite URL shown in the terminal. The client proxies `/api` requests to the backend on port 4000. The admin workspace is at `/admin`; local credentials are configured in the ignored `backend/.env` file.
+Open the Vite URL shown in the terminal. The client proxies `/api` requests to the backend on port 4000. The admin workspace is linked from the site and uses a query-string route so it works on static hosting without a rewrite rule; local credentials are configured in the ignored `backend/.env` file.
 
 ## Deploying the frontend
 
@@ -36,7 +36,7 @@ node -e "console.log(require('./backend/node_modules/bcryptjs').hashSync('your-p
 
 Build the client with `npm run build --prefix client`; then start the API with `npm start --prefix backend`. Express serves the built client from `client/dist`.
 
-Hero and project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP, or GIF files up to 5 MB. Files are stored in `backend/uploads`; production deployments should mount persistent storage there because MongoDB stores the image URL, not the image file itself.
+Hero and project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP, or GIF files up to 5 MB. Files are stored in `backend/uploads` by default. For Render, attach a persistent disk mounted at `/var/data` and set `UPLOAD_DIRECTORY=/var/data/uploads` on the backend service; MongoDB stores the image URL, not the image file itself. If an uploaded file is already missing, re-upload it after the persistent disk is mounted.
 
 The starter project entries are sample content. Update the profile and projects in the admin workspace before publishing.
 

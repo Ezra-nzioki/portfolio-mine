@@ -16,7 +16,7 @@ const tokenSecret = process.env.JWT_SECRET || require('node:crypto').randomBytes
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
 const frontendOrigins = new Set((process.env.FRONTEND_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean));
 const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE === 'none' ? 'none' : 'strict';
-const uploadDirectory = path.join(__dirname, 'uploads');
+const uploadDirectory = path.resolve(process.env.UPLOAD_DIRECTORY || path.join(__dirname, 'uploads'));
 const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const starterPortfolio = {

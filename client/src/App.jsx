@@ -98,7 +98,8 @@ function App() {
   const [portfolio, setPortfolio] = useState(emptyPortfolio);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const isAdmin = window.location.pathname.startsWith('/admin');
+  const isAdmin = window.location.pathname.startsWith('/admin')
+    || new URLSearchParams(window.location.search).get('admin') === '1';
 
   useEffect(() => {
     let active = true;
@@ -220,7 +221,7 @@ function PortfolioPage({ portfolio, loading, loadError }) {
           <a onClick={() => setMenuOpen(false)} href="#work">Work <span>03</span></a>
           <a onClick={() => setMenuOpen(false)} href="#about">About</a>
           <a className="nav-contact" onClick={() => setMenuOpen(false)} href="#contact">Let&apos;s talk <ArrowUpRight size={14} /></a>
-          <a className="nav-admin" href="/admin"><ShieldCheck size={15} /> Admin</a>
+          <a className="nav-admin" href="/?admin=1"><ShieldCheck size={15} /> Admin</a>
         </nav>
         <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="Open quick navigation" title="Quick navigation (Ctrl or Command + K)">
           <Search size={16} /><span>Quick find</span><kbd><Command size={11} /> K</kbd>
@@ -277,7 +278,7 @@ function PortfolioPage({ portfolio, loading, loadError }) {
 
       <CircuitBreakGame />
 
-      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home"><span>EN</span><i>.</i></a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><a href="/admin" className="admin-link">ADMIN <ArrowUpRight size={12} /></a></footer>
+      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home"><span>EN</span><i>.</i></a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><a href="/?admin=1" className="admin-link">ADMIN <ArrowUpRight size={12} /></a></footer>
       <PortfolioChat profile={profile} projects={projects} loading={loading} />
       <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} profile={profile} projects={projects} />
       </div>
