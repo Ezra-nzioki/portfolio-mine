@@ -20,7 +20,7 @@ Open the Vite URL shown in the terminal. The client proxies `/api` requests to t
 
 ## Deploying the frontend
 
-The production client always sends API requests to `https://portfoliobackend-toht.onrender.com`, even if `VITE_API_URL` is set in the frontend host's build environment. Local development can use `VITE_API_URL` or the Vite proxy to `http://localhost:4000`.
+The production client reads its backend URL from `client/.env.production` (`VITE_API_URL`). Set that value to the backend origin before building; the current value is `https://portfoliobackend-toht.onrender.com`. Local development can use `VITE_API_URL` or the Vite proxy to `http://localhost:4000`.
 
 On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. If the frontend and API use different site domains and admin sign-in needs cross-site cookies, set `ADMIN_COOKIE_SAME_SITE=none`; production cookies are marked `Secure`.
 
