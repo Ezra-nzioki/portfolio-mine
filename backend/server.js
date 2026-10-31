@@ -1,11 +1,11 @@
 const path = require('node:path');
-const fs = require('node:fs/promises');
-const { randomUUID } = require('node:crypto');
+const { Readable } = require('node:stream');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const cookieParser = require('cookie-parser');
+const cloudinary = require('cloudinary').v2;
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const multer = require('multer');
@@ -16,7 +16,15 @@ const tokenSecret = process.env.JWT_SECRET || require('node:crypto').randomBytes
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
 const frontendOrigins = new Set((process.env.FRONTEND_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean));
 const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE === 'none' ? 'none' : 'strict';
-const uploadDirectory = path.resolve(process.env.UPLOAD_DIRECTORY || path.join(__dirname, 'uploads'));
+const cloudinaryConfigured = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+if (cloudinaryConfigured) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+}
 const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const starterPortfolio = {
@@ -201,6 +209,9 @@ app.get('/api/admin/session', requireAdmin, (req, res) => res.json({ username: r
 app.post('/api/admin/uploads', requireAdmin, imageUpload.single('image'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' });
+    if (!cloudinaryConfigured) {
+      return res.status(503).json({ error: 'Image uploads are unavailable. Configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET on the backend.' });
+    }
     const bytes = req.file.buffer;
     const format = bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) ? 'jpg'
       : bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? 'png'
@@ -208,11 +219,23 @@ app.post('/api/admin/uploads', requireAdmin, imageUpload.single('image'), async 
           : bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP' ? 'webp'
             : null;
     if (!format) return res.status(415).json({ error: 'Use a JPEG, PNG, WebP, or GIF image.' });
-    const filename = `${randomUUID()}.${format}`;
-    await fs.mkdir(uploadDirectory, { recursive: true });
-    await fs.writeFile(path.join(uploadDirectory, filename), bytes);
-    return res.status(201).json({ url: `/uploads/${filename}` });
+    const result = await new Promise((resolve, reject) => {
+      const upload = cloudinary.uploader.upload_stream(
+        { folder: 'portfolio', resource_type: 'image' },
+        (error, uploadedImage) => {
+          if (error) return reject(error);
+          if (!uploadedImage?.secure_url) return reject(new Error('Cloudinary did not return an image URL.'));
+          return resolve(uploadedImage);
+        },
+      );
+      Readable.from([bytes]).pipe(upload).on('error', reject);
+    });
+    return res.status(201).json({ url: result.secure_url });
   } catch (error) {
+    console.error('Cloudinary image upload failed:', error);
+    if (error.http_code) {
+      return res.status(502).json({ error: error.message || 'Cloudinary could not store the image.' });
+    }
     return next(error);
   }
 });
@@ -245,7 +268,6 @@ app.get('/api/admin/messages', requireAdmin, requireDatabase, async (_req, res, 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
 
 const clientBuild = path.join(__dirname, '..', 'client', 'dist');
-app.use('/uploads', express.static(uploadDirectory, { maxAge: '1y', immutable: true }));
 app.use(express.static(clientBuild));
 app.get('*path', (_req, res, next) => {
   res.sendFile(path.join(clientBuild, 'index.html'), (error) => {
