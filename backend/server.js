@@ -698,6 +698,8 @@ app.delete('/api/admin/users/:id', requireAdmin, requireDatabase, async (req, re
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
 
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 const clientBuild = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientBuild));
 app.get('*path', (_req, res, next) => {

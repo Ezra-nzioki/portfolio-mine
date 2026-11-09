@@ -105,7 +105,8 @@ async function api(path, options = {}) {
 
 function apiUrl(path) {
   if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(path)) return path;
-  return `${API_BASE_URL}${path}`;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE_URL}${normalizedPath}`;
 }
 
 function getAnalyticsConsent() {
