@@ -253,13 +253,13 @@ function PortfolioPage({ portfolio, loading, loadError }) {
           <div className="hero-actions"><a href="#work" className="button button-primary">Explore selected work <ArrowDownRight size={18} /></a><a href="#contact" className="button button-outline">Get in touch <ArrowUpRight size={17} /></a>{profile.cvUrl && <a className="button button-outline" href={apiUrl('/api/cv')} download="CV.pdf"><Download size={17} /> Download CV</a>}</div>
           <div className="hero-index"><span className="status-dot" /> AVAILABLE FOR SELECT PROJECTS <span className="index-rule" /> NAIROBI, KE</div>
         </div>
-        <div className={`hero-art${heroImage ? ' has-image' : ''}`} aria-label={heroImage ? 'Portfolio hero image' : 'Abstract code-inspired artwork'}>
-          {heroImage ? <img className="hero-art-image" src={heroImage} alt={`Featured work by ${profile.name || 'Ezra Nzioki'}`} /> : <>
+        <div className={`hero-art${heroImage ? ' has-image' : ''}`} aria-label={heroImage ? 'Portfolio hero image' : loading ? 'Loading portfolio image' : 'Abstract code-inspired artwork'}>
+          {heroImage ? <img className="hero-art-image" src={heroImage} alt={`Featured work by ${profile.name || 'Ezra Nzioki'}`} /> : !loading && <>
             <div className="hero-art-grid" />
             <div className="hero-code-window"><div className="code-window-bar"><i /><i /><i /><span>ezra.dev / build.js</span></div><pre><span className="code-muted">01</span> <b>const</b> product = {'{'}<br /><span className="code-muted">02</span>   clarity: <em>&apos;always&apos;</em>,<br /><span className="code-muted">03</span>   performance: <em>&apos;fast&apos;</em>,<br /><span className="code-muted">04</span>   impact: <em>&apos;real&apos;</em><br /><span className="code-muted">05</span> {'}'};<br /><br /><span className="code-muted">06</span> <b>ship</b>(product); <span className="code-cursor" /></pre></div>
           </>}
-          <div className="hero-art-caption"><span><Code2 size={15} /> ENGINEERED WITH INTENTION</span><span>01 / 04</span></div>
-          {!heroImage && <span className="hero-art-orbit" aria-hidden="true" />}
+          {!loading && <div className="hero-art-caption"><span><Code2 size={15} /> ENGINEERED WITH INTENTION</span><span>01 / 04</span></div>}
+          {!loading && !heroImage && <span className="hero-art-orbit" aria-hidden="true" />}
         </div>
       </section>
 
