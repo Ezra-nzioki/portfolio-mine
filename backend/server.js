@@ -1,5 +1,6 @@
 const path = require('node:path');
 const { Readable } = require('node:stream');
+const crypto = require('node:crypto');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
@@ -10,12 +11,14 @@ const geoip = require('geoip-lite');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const multer = require('multer');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const port = process.env.PORT || 4000;
 const tokenSecret = process.env.JWT_SECRET || require('node:crypto').randomBytes(32).toString('hex');
 const dummyPasswordHash = bcrypt.hashSync(require('node:crypto').randomBytes(32).toString('hex'), 12);
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
+const emailCodeSecret = tokenSecret;
 const frontendOrigins = new Set((process.env.FRONTEND_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean));
 const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE || (process.env.NODE_ENV === 'production' ? 'none' : 'strict');
 const cloudinaryConfigured = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
@@ -125,6 +128,9 @@ const EmailAccount = mongoose.model('EmailAccount', new mongoose.Schema({
   name: { type: String, required: true, maxlength: 100 },
   email: { type: String, required: true, unique: true, maxlength: 200 },
   passwordHash: { type: String, required: true, select: false },
+  emailVerified: { type: Boolean, default: true },
+  verificationCodeHash: { type: String, select: false },
+  verificationCodeExpiresAt: { type: Date, select: false },
   ipAddress: { type: String, required: true },
   city: { type: String, default: '' },
   region: { type: String, default: '' },
@@ -261,6 +267,56 @@ function setVisitorSession(req, res, userId) {
     secure: secureCookie,
     sameSite: adminCookieSameSite,
     maxAge: 30 * 24 * 60 * 60 * 1000,
+  });
+}
+
+function getSmtpTransporter() {
+  const host = process.env.SMTP_HOST?.trim();
+  const from = process.env.SMTP_FROM?.trim();
+  const port = Number(process.env.SMTP_PORT || 587);
+  const username = process.env.SMTP_USER;
+  const password = process.env.SMTP_PASS;
+  const secureSetting = process.env.SMTP_SECURE?.trim().toLowerCase();
+  if (!host || !from || !Number.isInteger(port) || port < 1 || port > 65535
+    || Boolean(username) !== Boolean(password)
+    || (secureSetting && !['true', 'false'].includes(secureSetting))) {
+    return null;
+  }
+  return {
+    from,
+    transport: nodemailer.createTransport({
+      host,
+      port,
+      secure: secureSetting
+        ? secureSetting === 'true'
+        : port === 465,
+      ...(username ? { auth: { user: username, pass: password } } : {}),
+    }),
+  };
+}
+
+function hashEmailVerificationCode(userId, code) {
+  return crypto.createHmac('sha256', emailCodeSecret).update(`${userId}:${code}`).digest('hex');
+}
+
+async function sendEmailVerificationCode(user, smtp = getSmtpTransporter()) {
+  if (!smtp) throw new Error('Email verification is not configured. Set SMTP_HOST, SMTP_FROM, and valid SMTP settings on the backend.');
+  const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const codeHash = hashEmailVerificationCode(user._id, code);
+  if (mongoose.connection.readyState === 1) {
+    await EmailAccount.findByIdAndUpdate(user._id, {
+      $set: { verificationCodeHash: codeHash, verificationCodeExpiresAt: expiresAt },
+    });
+  } else {
+    user.verificationCodeHash = codeHash;
+    user.verificationCodeExpiresAt = expiresAt;
+  }
+  await smtp.transport.sendMail({
+    from: smtp.from,
+    to: user.email,
+    subject: 'Verify your portfolio account',
+    text: `Hello ${user.name},\n\nYour email verification code is ${code}.\n\nIt expires in 10 minutes. If you did not request this, you can ignore this email.`,
   });
 }
 
@@ -414,7 +470,12 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
   if (password.length < 10 || Buffer.byteLength(password, 'utf8') > 72) {
     return res.status(400).json({ error: 'Use a password of at least 10 characters and no more than 72 bytes.' });
   }
+  const smtp = getSmtpTransporter();
+  if (!smtp) {
+    return res.status(503).json({ error: 'Email verification is not configured. Ask the site owner to configure SMTP on the backend.' });
+  }
 
+  let createdUser;
   try {
     const ipAddress = req.ip?.replace(/^::ffff:/, '');
     if (!ipAddress) return res.status(400).json({ error: 'Your sign-up could not be completed. Please try again.' });
@@ -423,6 +484,7 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
       name,
       email,
       passwordHash: await bcrypt.hash(password, 12),
+      emailVerified: false,
       ipAddress,
       city: location?.city || '',
       region: location?.region || '',
@@ -441,10 +503,75 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
         memoryUsers.set(id, memoryUser);
         return memoryUser;
       })();
-    setVisitorSession(req, res, user._id);
-    return res.status(201).json({ user: { name: user.name, email: user.email } });
+    createdUser = user;
+    await sendEmailVerificationCode(user, smtp);
+    return res.status(201).json({ message: 'A verification code has been sent to your email address.' });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ error: 'An account with this email already exists.' });
+    if (createdUser) {
+      if (mongoose.connection.readyState === 1) await EmailAccount.findByIdAndDelete(createdUser._id);
+      else memoryUsers.delete(createdUser._id.toString());
+    }
+    return next(error);
+  }
+});
+
+app.post('/api/auth/verify-email', limitAuthAttempts, requireDatabase, async (req, res, next) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body.code === 'string' ? req.body.code.trim() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200 || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Enter the email address and six-digit code.' });
+  }
+
+  try {
+    const user = mongoose.connection.readyState === 1
+      ? await EmailAccount.findOne({ email }).select('+verificationCodeHash +verificationCodeExpiresAt')
+      : [...memoryUsers.values()].find((account) => account.email === email);
+    const storedHash = user?.verificationCodeHash;
+    const codeIsValid = typeof storedHash === 'string'
+      && /^[a-f\d]{64}$/i.test(storedHash)
+      && user.verificationCodeExpiresAt > new Date()
+      && crypto.timingSafeEqual(
+        Buffer.from(storedHash, 'hex'),
+        Buffer.from(hashEmailVerificationCode(user._id, code), 'hex'),
+      );
+    if (!user || user.emailVerified !== false || !codeIsValid) {
+      return res.status(400).json({ error: 'That verification code is invalid or expired. Request a new code and try again.' });
+    }
+
+    if (mongoose.connection.readyState === 1) {
+      await EmailAccount.findByIdAndUpdate(user._id, {
+        $set: { emailVerified: true },
+        $unset: { verificationCodeHash: 1, verificationCodeExpiresAt: 1 },
+      });
+    } else {
+      user.emailVerified = true;
+      delete user.verificationCodeHash;
+      delete user.verificationCodeExpiresAt;
+    }
+    return res.json({ verified: true });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/auth/resend-verification', limitAuthAttempts, requireDatabase, async (req, res, next) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
+    return res.status(400).json({ error: 'Enter a valid email address.' });
+  }
+  const smtp = getSmtpTransporter();
+  if (!smtp) {
+    return res.status(503).json({ error: 'Email verification is not configured. Ask the site owner to configure SMTP on the backend.' });
+  }
+
+  try {
+    const user = mongoose.connection.readyState === 1
+      ? await EmailAccount.findOne({ email })
+      : [...memoryUsers.values()].find((account) => account.email === email);
+    if (user?.emailVerified === false) await sendEmailVerificationCode(user, smtp);
+    return res.json({ message: 'If that account needs verification, a new code has been sent.' });
+  } catch (error) {
     return next(error);
   }
 });
@@ -464,6 +591,9 @@ app.post('/api/auth/login', limitAuthAttempts, requireDatabase, async (req, res,
     const passwordMatches = await bcrypt.compare(password, user?.passwordHash || dummyPasswordHash);
     if (!user || !passwordMatches) {
       return res.status(401).json({ error: 'Email or password is incorrect.' });
+    }
+    if (user.emailVerified === false) {
+      return res.status(403).json({ error: 'Verify your email address before signing in.' });
     }
 
     const ipAddress = req.ip?.replace(/^::ffff:/, '');

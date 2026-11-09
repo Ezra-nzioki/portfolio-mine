@@ -196,22 +196,62 @@ function App() {
 
 function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {}, onAdminSignIn = () => {} }) {
   const [registering, setRegistering] = useState(false);
+  const [verificationPending, setVerificationPending] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
   const [formError, setFormError] = useState('');
+  const [formNotice, setFormNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
     setBusy(true);
     setFormError('');
+    setFormNotice('');
     try {
-      const result = await api(registering ? '/api/auth/register' : '/api/auth/login', {
+      if (verificationPending) {
+        await api('/api/auth/verify-email', {
+          method: 'POST',
+          body: JSON.stringify({ email, code: verificationCode }),
+        });
+        setVerificationPending(false);
+        setRegistering(false);
+        setPassword('');
+        setVerificationCode('');
+        setFormNotice('Email verified. You can now sign in.');
+      } else if (registering) {
+        const result = await api('/api/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({ name, email, password }),
+        });
+        setVerificationPending(true);
+        setFormNotice(result.message);
+      } else {
+        const result = await api('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+        });
+        onSignedIn(result.user);
+      }
+    } catch (requestError) {
+      setFormError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendVerificationCode() {
+    setBusy(true);
+    setFormError('');
+    setFormNotice('');
+    try {
+      const result = await api('/api/auth/resend-verification', {
         method: 'POST',
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ email }),
       });
-      onSignedIn(result.user);
+      setFormNotice(result.message);
     } catch (requestError) {
       setFormError(requestError.message);
     } finally {
@@ -224,21 +264,54 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
       <a className="wordmark" href="/" aria-label="Ezra Devs home">EZRA<span>.</span>DEVS</a>
       <section className="email-login-panel">
         <span className="section-kicker">WELCOME TO THE PORTFOLIO</span>
-        <h1>{loading ? 'Checking your sign-in...' : registering ? 'Create your account.' : 'Sign in to continue.'}</h1>
-        <p>Create an account or sign in with your email and password. Your name, email, IP address, and approximate location are stored until the site admin deletes your account. Location is approximate and determined locally; your IP is not sent to a lookup service. Email addresses are not verified.</p>
+        <h1>{loading ? 'Checking your sign-in...' : verificationPending ? 'Check your email.' : registering ? 'Create your account.' : 'Sign in to continue.'}</h1>
+        <p>{verificationPending
+          ? `Enter the six-digit verification code sent to ${email}. The code expires in 10 minutes.`
+          : 'Create an account or sign in with your email and password. New accounts must verify their email before signing in. Your name, email, IP address, and approximate location are stored until the site admin deletes your account. Location is approximate and determined locally; your IP is not sent to a lookup service.'}</p>
         {!loading && <form className="email-login-form" onSubmit={submit}>
-          {registering && <label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" maxLength="100" required /></label>}
-          <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
-          <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} minLength="10" maxLength="72" required /></label>
-          {registering && <span className="email-login-hint">Use at least 10 characters.</span>}
-          <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : registering ? 'Create account' : 'Sign in'} <ArrowRight size={16} /></button>
+          {verificationPending
+            ? <label>Verification code<input type="text" inputMode="numeric" autoComplete="one-time-code" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" pattern="\d{6}" required /></label>
+            : <>
+              {registering && <label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" maxLength="100" required /></label>}
+              <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
+              <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} minLength={registering ? 10 : undefined} maxLength="72" required /></label>
+              {registering && <span className="email-login-hint">Use at least 10 characters.</span>}
+            </>}
+          <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : verificationPending ? 'Verify email' : registering ? 'Create account' : 'Sign in'} <ArrowRight size={16} /></button>
         </form>}
         {(formError || error) && <span className="email-login-error" role="alert">{formError || error}</span>}
-        {!loading && <button className="email-login-toggle" type="button" onClick={() => {
+        {formNotice && <span className="email-login-status" role="status">{formNotice}</span>}
+        {!loading && verificationPending && <>
+          <button className="email-login-toggle" type="button" onClick={resendVerificationCode} disabled={busy}>Resend verification code</button>
+          <button className="email-login-toggle" type="button" onClick={() => {
+            setVerificationPending(false);
+            setFormError('');
+            setFormNotice('');
+          }}>Back to sign in</button>
+        </>}
+        {!loading && !verificationPending && !registering && <button className="email-login-toggle" type="button" onClick={async () => {
+          setBusy(true);
+          setFormError('');
+          setFormNotice('');
+          try {
+            const result = await api('/api/auth/resend-verification', {
+              method: 'POST',
+              body: JSON.stringify({ email }),
+            });
+            setVerificationPending(true);
+            setFormNotice(result.message);
+          } catch (requestError) {
+            setFormError(requestError.message);
+          } finally {
+            setBusy(false);
+          }
+        }} disabled={busy}>Need to verify? Send a code</button>}
+        {!loading && !verificationPending && <button className="email-login-toggle" type="button" onClick={() => {
           setRegistering((current) => !current);
           setFormError('');
+          setFormNotice('');
         }}>{registering ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>}
-        {!loading && <button className="email-login-toggle" type="button" onClick={onAdminSignIn}>Admin? Sign in with username</button>}
+        {!loading && !verificationPending && <button className="email-login-toggle" type="button" onClick={onAdminSignIn}>Admin? Sign in with username</button>}
       </section>
     </main>
   );

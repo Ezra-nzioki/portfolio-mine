@@ -882,7 +882,9 @@ body { background-color: #0F4C5C; background-image: radial-gradient(ellipse at 8
 .email-sign-in-button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 0 15px; border: 0; background: #FB8B24; color: #0F4C5C; cursor: pointer; font-size: 11px; font-weight: 700; }
 .email-sign-in-button:hover:not(:disabled) { background: #FFFFFF; }.email-sign-in-button:disabled { opacity: .65; cursor: wait; }
 .email-login-error { color: #FB8B24; font-size: 10px; line-height: 1.6; }
+.email-login-status { color: #F0E5E5; font-size: 10px; line-height: 1.6; }
 .email-login-toggle { border: 0; padding: 0; background: transparent; color: #F0E5E5; cursor: pointer; font: 9px var(--mono); text-decoration: underline; text-underline-offset: 3px; }
+.email-login-toggle:disabled { opacity: .6; cursor: wait; }
 .signed-in-user { color: #F0E5E5; font: 8px var(--mono); }.signed-in-user button { border: 0; padding: 0; background: transparent; color: #FB8B24; cursor: pointer; font: inherit; text-decoration: underline; }
 .admin-users-table td strong { color: #FFFFFF; font-family: var(--ui-font); font-size: 10px; }
 .user-delete-button { padding: 6px 8px; border: 1px solid #283618; background: transparent; color: #FFFFFF; cursor: pointer; font-size: 8px; }.user-delete-button:hover { border-color: #FB8B24; }.user-delete-button:disabled { opacity: .6; cursor: wait; }

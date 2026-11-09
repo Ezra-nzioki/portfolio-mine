@@ -20,6 +20,7 @@
     "geoip-lite": "^2.0.3",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.0",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "nodemailer": "^10.4.0"
   }
 }
