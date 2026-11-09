@@ -300,12 +300,48 @@ function getSmtpTransporter() {
   };
 }
 
+function getEmailService() {
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  const resendFrom = process.env.RESEND_FROM?.trim();
+  if (resendApiKey || resendFrom) {
+    if (!resendApiKey || !resendFrom) return null;
+    return {
+      from: resendFrom,
+      transport: nodemailer.createTransport({
+        host: 'smtp.resend.com',
+        port: 2587,
+        secure: false,
+        auth: { user: 'resend', pass: resendApiKey },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
+      }),
+    };
+  }
+  return getSmtpTransporter();
+}
+
+async function sendEmail(emailService, message) {
+  return emailService.transport.sendMail(message);
+}
+
+function getEmailDeliveryErrorMessage(error, purpose) {
+  const emailType = purpose === 'verification' ? 'verification' : 'password recovery';
+  if (error?.code === 'EAUTH' || [401, 403, 534, 535].includes(Number(error?.responseCode))) {
+    return `The email provider rejected its credentials or sender, so the ${emailType} email could not be sent. The site owner must check the Resend API key or SMTP app password and verify the sender domain.`;
+  }
+  if (['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'ENOTFOUND', 'EHOSTUNREACH', 'EAI_AGAIN'].includes(error?.code)) {
+    return `The backend could not connect to its email provider. On Render Free, use Resend SMTP on port 2587; outbound SMTP ports 25, 465, and 587 are blocked.`;
+  }
+  return `The ${emailType} email could not be sent. The site owner should check the backend email service settings.`;
+}
+
 function hashEmailVerificationCode(userId, code) {
   return crypto.createHmac('sha256', emailCodeSecret).update(`${userId}:${code}`).digest('hex');
 }
 
-async function sendEmailVerificationCode(user, smtp = getSmtpTransporter()) {
-  if (!smtp) throw new Error('Email verification is not configured. Set SMTP_HOST, SMTP_FROM, and valid SMTP settings on the backend.');
+async function sendEmailVerificationCode(user, emailService = getEmailService()) {
+  if (!emailService) throw new Error('Email verification is not configured. Set RESEND_API_KEY and RESEND_FROM, or valid SMTP settings, on the backend.');
   const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const codeHash = hashEmailVerificationCode(user._id, code);
@@ -317,16 +353,16 @@ async function sendEmailVerificationCode(user, smtp = getSmtpTransporter()) {
     user.verificationCodeHash = codeHash;
     user.verificationCodeExpiresAt = expiresAt;
   }
-  await smtp.transport.sendMail({
-    from: smtp.from,
+  await sendEmail(emailService, {
+    from: emailService.from,
     to: user.email,
     subject: 'Verify your portfolio account',
     text: `Hello ${user.name},\n\nYour email verification code is ${code}.\n\nIt expires in 10 minutes. If you did not request this, you can ignore this email.`,
   });
 }
 
-async function sendPasswordResetCode(user, smtp = getSmtpTransporter()) {
-  if (!smtp) throw new Error('Password recovery email is not configured. Ask the site owner to check SMTP settings on the backend.');
+async function sendPasswordResetCode(user, emailService = getEmailService()) {
+  if (!emailService) throw new Error('Password recovery email is not configured. Set RESEND_API_KEY and RESEND_FROM, or valid SMTP settings, on the backend.');
   const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const codeHash = crypto.createHmac('sha256', emailCodeSecret)
@@ -340,8 +376,8 @@ async function sendPasswordResetCode(user, smtp = getSmtpTransporter()) {
     user.passwordResetCodeHash = codeHash;
     user.passwordResetCodeExpiresAt = expiresAt;
   }
-  await smtp.transport.sendMail({
-    from: smtp.from,
+  await sendEmail(emailService, {
+    from: emailService.from,
     to: user.email,
     subject: 'Reset your portfolio account password',
     text: `Hello ${user.name},\n\nYour password reset code is ${code}.\n\nIt expires in 10 minutes. If you did not request this, you can ignore this email.`,
@@ -495,12 +531,12 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
   if (!name || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
     return res.status(400).json({ error: 'Enter your name and a valid email address.' });
   }
-  if (password.length < 10 || Buffer.byteLength(password, 'utf8') > 72) {
-    return res.status(400).json({ error: 'Use a password of at least 10 characters and no more than 72 bytes.' });
+  if (password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ error: 'Use a password of at least 6 characters and no more than 72 bytes.' });
   }
-  const smtp = getSmtpTransporter();
-  if (!smtp) {
-    return res.status(503).json({ error: 'Email verification is not configured. Ask the site owner to configure SMTP on the backend.' });
+  const emailService = getEmailService();
+  if (!emailService) {
+    return res.status(503).json({ error: 'Email verification is not configured. The site owner must configure RESEND_API_KEY and RESEND_FROM, or valid SMTP settings, on the backend.' });
   }
 
   try {
@@ -531,12 +567,12 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
         return memoryUser;
       })();
     try {
-      await sendEmailVerificationCode(user, smtp);
+      await sendEmailVerificationCode(user, emailService);
     } catch (error) {
       console.error('Verification email delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
       if (mongoose.connection.readyState === 1) await EmailAccount.findByIdAndDelete(user._id);
       else memoryUsers.delete(user._id.toString());
-      return res.status(502).json({ error: 'Could not send the verification email. Check the SMTP host, port, app password, and hosting provider SMTP restrictions, then try again.' });
+      return res.status(502).json({ error: getEmailDeliveryErrorMessage(error, 'verification') });
     }
     return res.status(201).json({ message: 'A verification code has been sent to your email address.' });
   } catch (error) {
@@ -597,20 +633,20 @@ app.post('/api/auth/resend-verification', limitAuthAttempts, requireDatabase, as
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
     return res.status(400).json({ error: 'Enter a valid email address.' });
   }
-  const smtp = getSmtpTransporter();
-  if (!smtp) {
-    return res.status(503).json({ error: 'Email verification is not configured. Ask the site owner to configure SMTP on the backend.' });
+  const emailService = getEmailService();
+  if (!emailService) {
+    return res.status(503).json({ error: 'Email verification is not configured. The site owner must configure RESEND_API_KEY and RESEND_FROM, or valid SMTP settings, on the backend.' });
   }
 
   try {
     const user = mongoose.connection.readyState === 1
       ? await EmailAccount.findOne({ email })
       : [...memoryUsers.values()].find((account) => account.email === email);
-    if (user?.emailVerified === false) await sendEmailVerificationCode(user, smtp);
+    if (user?.emailVerified === false) await sendEmailVerificationCode(user, emailService);
     return res.json({ message: 'If that account needs verification, a new code has been sent.' });
   } catch (error) {
     console.error('Verification code resend failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
-    return res.status(502).json({ error: 'Could not send a new verification email. Check the SMTP settings and try again.' });
+    return res.status(502).json({ error: getEmailDeliveryErrorMessage(error, 'verification') });
   }
 });
 
@@ -619,9 +655,9 @@ app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
     return res.status(400).json({ error: 'Enter a valid email address.' });
   }
-  const smtp = getSmtpTransporter();
-  if (!smtp) {
-    return res.status(503).json({ error: 'Password recovery email is unavailable. The site owner needs to check backend SMTP settings.' });
+  const emailService = getEmailService();
+  if (!emailService) {
+    return res.status(503).json({ error: 'Password recovery email is not configured. The site owner must configure RESEND_API_KEY and RESEND_FROM, or valid SMTP settings, on the backend.' });
   }
 
   try {
@@ -629,12 +665,12 @@ app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async 
       ? await EmailAccount.findOne({ email })
       : [...memoryUsers.values()].find((account) => account.email === email);
     if (user && user.emailVerified !== false) {
-      await sendPasswordResetCode(user, smtp);
+      await sendPasswordResetCode(user, emailService);
     }
     return res.json({ message: 'If a verified account exists for that email, a password reset code has been sent.' });
   } catch (error) {
     console.error('Password recovery email delivery failed:', { code: error.code, responseCode: error.responseCode });
-    return res.status(502).json({ error: 'We could not send a password recovery email. Check the backend SMTP settings and try again.' });
+    return res.status(502).json({ error: getEmailDeliveryErrorMessage(error, 'password recovery') });
   }
 });
 
@@ -645,8 +681,8 @@ app.post('/api/auth/reset-password', limitAuthAttempts, requireDatabase, async (
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200 || !/^\d{6}$/.test(code)) {
     return res.status(400).json({ error: 'Enter the email address and six-digit reset code.' });
   }
-  if (password.length < 10 || Buffer.byteLength(password, 'utf8') > 72) {
-    return res.status(400).json({ error: 'Use a password of at least 10 characters and no more than 72 bytes.' });
+  if (password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ error: 'Use a password of at least 6 characters and no more than 72 bytes.' });
   }
 
   try {

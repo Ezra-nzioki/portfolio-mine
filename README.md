@@ -24,9 +24,20 @@ The production client reads its API base URL from `client/.env.production` (`VIT
 
 On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. Production defaults admin cookies to `SameSite=None` and marks them `Secure` for separately hosted frontend and API services. Set `ADMIN_COOKIE_SAME_SITE` only if you need to override that behavior.
 
-Visitors create an account with their name, email, and a password of at least 10 characters. The backend emails a six-digit verification code that expires after 10 minutes; users must verify their email before signing in. The **Forgot password?** flow sends a separate six-digit reset code to the verified email; it also expires after 10 minutes and can be used once. Passwords and verification codes are not stored in plaintext.
+Visitors create an account with their name, email, and a password of at least 6 characters. The backend emails a six-digit verification code that expires after 10 minutes; users must verify their email before signing in. The **Forgot password?** flow sends a separate six-digit reset code to the verified email; it also expires after 10 minutes and can be used once. Passwords and verification codes are not stored in plaintext.
 
-For Gmail delivery on Render, open the backend web service's **Environment** settings and add:
+Email verification and password recovery require a backend email provider. **Render Free web services cannot send outbound SMTP on ports 25, 465, or 587.** Therefore, Gmail SMTP will not work on a Render Free backend even with a correct Google App Password. Use the Resend HTTPS API described below, or host the backend somewhere that permits SMTP.
+
+For Render Free, configure Resend SMTP in the backend service's **Environment** settings:
+
+| Variable | Value |
+|---|---|
+| `RESEND_API_KEY` | An API key created in your Resend account |
+| `RESEND_FROM` | A sender such as `Portfolio <accounts@your-verified-domain.com>` |
+
+Verify the sender domain in Resend before using it. Add these values to Render's backend service environment (not the frontend and not source control), save, and wait for the backend to redeploy. Nodemailer connects to Resend at `smtp.resend.com` on port `2587` using the API key as its SMTP password. Render Free blocks outbound SMTP on ports 25, 465, and 587, but not 2587 according to its documented restriction. When either Resend setting is present, both are required; otherwise the backend can use the configured SMTP fallback.
+
+On a host that permits SMTP, Gmail can instead be configured in the backend service's **Environment** settings:
 
 | Variable | Value |
 |---|---|
@@ -37,7 +48,9 @@ For Gmail delivery on Render, open the backend web service's **Environment** set
 | `SMTP_USER` | The same Gmail address |
 | `SMTP_PASS` | A Google App Password for that account (not your regular Gmail password) |
 
-Create a Google App Password in your Google Account's **Security → 2-Step Verification → App passwords** settings. Keep it secret and enter it only in Render's Environment settings, never in source control or chat. Save the settings and wait for Render to redeploy the backend before registering. With `MONGODB_URI` configured, accounts are stored in the `emailaccounts` collection; without MongoDB, account data is temporary and is lost when the backend restarts. The backend rate-limits sign-in, registration, and verification attempts. Account names, email addresses, IP addresses, and approximate locations are retained until an admin deletes them from Admin → Users. Existing Google sign-in records remain in the legacy `users` collection and can be removed from that admin page; Google sign-in is no longer available.
+Create a Google App Password in your Google Account's **Security → 2-Step Verification → App passwords** settings. Keep it secret and enter it only in the hosting provider's Environment settings, never in source control or chat. Save the settings and wait for the backend to redeploy before registering. With `MONGODB_URI` configured, accounts are stored in the `emailaccounts` collection; without MongoDB, account data is temporary and is lost when the backend restarts. The backend rate-limits sign-in, registration, and verification attempts. Account names, email addresses, IP addresses, and approximate locations are retained until an admin deletes them from Admin → Users. Existing Google sign-in records remain in the legacy `users` collection and can be removed from that admin page; Google sign-in is no longer available.
+
+Render documents this restriction in its [Free web services limitations](https://render.com/docs/free#other-limitations).
 
 ## MongoDB persistence
 

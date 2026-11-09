@@ -349,14 +349,14 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
             : resetPending
               ? <>
                 <label>Reset code<input type="text" inputMode="numeric" autoComplete="one-time-code" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" pattern="\d{6}" required /></label>
-                <label>New password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength="10" maxLength="72" required /></label>
-                <span className="email-login-hint">Use at least 10 characters.</span>
+                <label>New password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength="6" maxLength="72" required /></label>
+                <span className="email-login-hint">Use at least 6 characters.</span>
               </>
               : <>
               {registering && <label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" maxLength="100" required /></label>}
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
-              {!passwordRecovery && <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} minLength={registering ? 10 : undefined} maxLength="72" required /></label>}
-              {registering && <span className="email-login-hint">Use at least 10 characters.</span>}
+              {!passwordRecovery && <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} minLength={registering ? 6 : undefined} maxLength="72" required /></label>}
+              {registering && <span className="email-login-hint">Use at least 6 characters.</span>}
             </>}
           <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : verificationPending ? 'Verify email' : resetPending ? 'Reset password' : passwordRecovery ? 'Send reset code' : registering ? 'Create account' : 'Sign in'} <ArrowRight size={16} /></button>
         </form>}
