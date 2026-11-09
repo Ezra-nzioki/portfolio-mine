@@ -36,7 +36,9 @@ node -e "console.log(require('./backend/node_modules/bcryptjs').hashSync('your-p
 
 Build the client with `npm run build --prefix client`; then start the API with `npm start --prefix backend`. Express serves the built client from `client/dist`.
 
-Hero and project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP, or GIF files up to 5 MB. Uploads are stored in Cloudinary, and their secure URLs are saved in MongoDB. In the Cloudinary dashboard, find the cloud name and API key under **Settings → API Keys**, then set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the backend service environment. Keep these credentials on the backend only; never add them to the frontend environment. Existing image paths from local storage must be re-uploaded from Admin.
+Hero and project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP, or GIF files up to 5 MB. A PDF CV up to 10 MB can also be uploaded; the public portfolio shows a download button when one is saved. Uploads are stored in Cloudinary, and their secure URLs are saved in MongoDB. In the Cloudinary dashboard, find the cloud name and API key under **Settings → API Keys**, then set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the backend service environment. Keep these credentials on the backend only; never add them to the frontend environment. Existing image paths from local storage must be re-uploaded from Admin.
+
+The Admin **Analytics** tab tracks aggregate page and section views, refreshes every five seconds, and includes a seven-day chart, most-viewed section, and reset control. It does not store visitor names, IP addresses, or individual browsing histories. Analytics persist in MongoDB when configured and otherwise remain in memory until the backend restarts.
 
 The starter project entries are sample content. Update the profile and projects in the admin workspace before publishing.
 

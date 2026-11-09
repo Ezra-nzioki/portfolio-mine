@@ -7,11 +7,14 @@ import {
   ArrowUp,
   ArrowUpRight,
   Bot,
+  BarChart3,
   Check,
   Code2,
   Command,
   CornerDownLeft,
+  Download,
   ExternalLink,
+  FileText,
   Github,
   ImagePlus,
   Layers3,
@@ -150,6 +153,31 @@ function PortfolioPage({ portfolio, loading, loadError }) {
   }, []);
 
   useEffect(() => {
+    const sendView = (type, section) => {
+      api('/api/analytics/view', {
+        method: 'POST',
+        body: JSON.stringify(section ? { type, section } : { type }),
+      }).catch((error) => console.error('Analytics tracking failed:', error));
+    };
+    sendView('page');
+    const viewedSections = new Set();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const section = entry.target.id;
+        if (entry.isIntersecting && !viewedSections.has(section)) {
+          viewedSections.add(section);
+          sendView('section', section);
+        }
+      });
+    }, { threshold: 0.25 });
+    ['home', 'work', 'game', 'about', 'stack', 'contact'].forEach((id) => {
+      const section = document.getElementById(id);
+      if (section) observer.observe(section);
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     let frame = 0;
     function updateProgress() {
       cancelAnimationFrame(frame);
@@ -197,7 +225,7 @@ function PortfolioPage({ portfolio, loading, loadError }) {
   const heroImage = profile.heroImage ? apiUrl(profile.heroImage) : '';
 
   return (
-    <main className="site-shell" id="home">
+    <main className="site-shell">
       <div className="reading-progress" role="progressbar" aria-label="Page reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <span ref={progressBarRef} />
       </div>
@@ -217,12 +245,12 @@ function PortfolioPage({ portfolio, loading, loadError }) {
         </button>
       </header>
 
-      <section className="hero section-wrap" aria-labelledby="hero-title">
+      <section className="hero section-wrap" id="home" aria-labelledby="hero-title">
         <div className="hero-copy">
           <div className="eyebrow"><span className="eyebrow-line" /> FULL-STACK DEVELOPER <span className="eyebrow-separator">/</span> NAIROBI, KENYA</div>
           <h1 id="hero-title">{profile.headline || 'Thoughtful digital products, built for the real world.'}</h1>
           <p className="hero-intro">I&apos;m <strong>{profile.name || 'Ezra Nzioki'}</strong> — a full-stack developer turning complex operational problems into fast, scalable MERN applications and high-impact web experiences.</p>
-          <div className="hero-actions"><a href="#work" className="button button-primary">Explore selected work <ArrowDownRight size={18} /></a><a href="#contact" className="button button-outline">Get in touch <ArrowUpRight size={17} /></a></div>
+          <div className="hero-actions"><a href="#work" className="button button-primary">Explore selected work <ArrowDownRight size={18} /></a><a href="#contact" className="button button-outline">Get in touch <ArrowUpRight size={17} /></a>{profile.cvUrl && <a className="button button-outline" href={apiUrl('/api/cv')} download="CV.pdf"><Download size={17} /> Download CV</a>}</div>
           <div className="hero-index"><span className="status-dot" /> AVAILABLE FOR SELECT PROJECTS <span className="index-rule" /> NAIROBI, KE</div>
         </div>
         <div className={`hero-art${heroImage ? ' has-image' : ''}`} aria-label={heroImage ? 'Portfolio hero image' : 'Abstract code-inspired artwork'}>
@@ -496,7 +524,7 @@ function CircuitBreakGame() {
   }
 
   return (
-    <section className="game-section section-wrap" aria-labelledby="game-title">
+    <section className="game-section section-wrap" id="game" aria-labelledby="game-title">
       <div className="game-heading">
         <div><span className="section-kicker">A TACTICAL MINI ARCADE</span><h2 id="game-title">Circuit Break<span>.</span></h2><p>Infiltrate the grid. Collect every data shard, outmaneuver the patrol, and reach the exit.</p></div>
         <div className="circuit-stats">
@@ -736,12 +764,16 @@ function Admin() {
   const [login, setLogin] = useState({ username: '', password: '' });
   const [portfolio, setPortfolio] = useState(emptyPortfolio);
   const [messages, setMessages] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState('');
+  const [resettingAnalytics, setResettingAnalytics] = useState(false);
   const [tab, setTab] = useState('content');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [uploadingProject, setUploadingProject] = useState(null);
   const [uploadingHero, setUploadingHero] = useState(false);
+  const [uploadingCv, setUploadingCv] = useState(false);
 
   useEffect(() => {
     api('/api/admin/session')
@@ -752,6 +784,28 @@ function Admin() {
       .then(([data, inbox]) => { setPortfolio(data); setMessages(inbox); })
       .catch((requestError) => { if (requestError.message !== 'Authentication required.') setError(requestError.message); });
   }, []);
+
+  useEffect(() => {
+    if (!user || tab !== 'analytics') return undefined;
+    let active = true;
+    const refreshAnalytics = async () => {
+      try {
+        const data = await api('/api/admin/analytics');
+        if (active) {
+          setAnalytics(data);
+          setAnalyticsError('');
+        }
+      } catch (requestError) {
+        if (active) setAnalyticsError(requestError.message);
+      }
+    };
+    refreshAnalytics();
+    const interval = window.setInterval(refreshAnalytics, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user, tab]);
 
   async function signIn(event) {
     event.preventDefault();
@@ -771,6 +825,10 @@ function Admin() {
   }
 
   async function save() {
+    if (uploadingProject !== null || uploadingHero || uploadingCv) {
+      setError('Wait for file uploads to finish before saving changes.');
+      return;
+    }
     setBusy(true);
     setNotice('');
     setError('');
@@ -790,6 +848,20 @@ function Admin() {
     setUser(null);
   }
 
+  async function resetAnalytics() {
+    if (!window.confirm('Reset all website view tracking? This cannot be undone.')) return;
+    setResettingAnalytics(true);
+    setAnalyticsError('');
+    try {
+      await api('/api/admin/analytics', { method: 'DELETE' });
+      setAnalytics({ totalPageViews: 0, totalSectionViews: 0, pageViews: [], sectionViews: [] });
+    } catch (requestError) {
+      setAnalyticsError(requestError.message);
+    } finally {
+      setResettingAnalytics(false);
+    }
+  }
+
   if (!user) return <main className="admin-login-shell"><a className="wordmark login-wordmark" href="/"><span>EN</span><i>.</i></a><div className="login-panel"><span className="section-kicker">PORTFOLIO ADMIN</span><h1>Welcome<br />back, Ezra.</h1><p>Sign in to update your portfolio and view messages.</p><form onSubmit={signIn}><label>Username<input value={login.username} onChange={(event) => setLogin({ ...login, username: event.target.value })} autoComplete="username" required /></label><label>Password<input type="password" value={login.password} onChange={(event) => setLogin({ ...login, password: event.target.value })} autoComplete="current-password" required /></label><button className="admin-primary" disabled={busy}>{busy ? 'Signing in...' : 'Sign in'} <ArrowRight size={16} /></button><span className="error-text" role="alert">{error}</span></form></div><a href="/" className="back-home"><ArrowDownRight size={14} /> Back to portfolio</a></main>;
 
   const updateProfile = (key, value) => setPortfolio((current) => ({ ...current, profile: { ...current.profile, [key]: value } }));
@@ -803,6 +875,28 @@ function Admin() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Image upload failed.');
     return result.url;
+  }
+
+  async function uploadCv(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setUploadingCv(true);
+    setError('');
+    setNotice('');
+    try {
+      const formData = new FormData();
+      formData.append('cv', file);
+      const response = await fetch(apiUrl('/api/admin/cv'), { method: 'POST', credentials: 'include', body: formData });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'CV upload failed.');
+      updateProfile('cvUrl', result.url);
+      setNotice('CV uploaded. Save changes to publish it.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setUploadingCv(false);
+    }
   }
 
   async function uploadHeroImage(event) {
@@ -840,12 +934,14 @@ function Admin() {
   }
 
   const heroImage = portfolio.profile.heroImage ? apiUrl(portfolio.profile.heroImage) : '';
+  const maxDailyViews = Math.max(1, ...(analytics?.pageViews || []).map((day) => day.count));
+  const mostViewedSection = analytics?.sectionViews?.[0];
 
   return (
     <main className="admin-shell">
       <header className="admin-header"><a className="wordmark" href="/"><span>EN</span><i>.</i></a><div className="admin-header-title"><span>PORTFOLIO / CONTROL ROOM</span><b>{getKenyanGreeting()}, {user}.</b></div><button className="admin-logout" onClick={signOut}><LogOut size={15} /> Sign out</button></header>
       <div className="admin-layout">
-        <aside className="admin-sidebar"><span className="sidebar-label">WORKSPACE</span><button className={tab === 'content' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('content')}><Layers3 size={17} /> Portfolio <ArrowRight size={14} /></button><button className={tab === 'messages' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('messages')}><MessageSquareText size={17} /> Messages <span className="message-count">{messages.length}</span></button><div className="sidebar-bottom"><ShieldCheck size={17} /><span>Private admin access<br /><b>Session protected</b></span></div></aside>
+        <aside className="admin-sidebar"><span className="sidebar-label">WORKSPACE</span><button className={tab === 'content' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('content')}><Layers3 size={17} /> Portfolio <ArrowRight size={14} /></button><button className={tab === 'messages' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('messages')}><MessageSquareText size={17} /> Messages <span className="message-count">{messages.length}</span></button><button className={tab === 'analytics' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('analytics')}><BarChart3 size={17} /> Analytics <ArrowRight size={14} /></button><div className="sidebar-bottom"><ShieldCheck size={17} /><span>Private admin access<br /><b>Session protected</b></span></div></aside>
         <section className="admin-main">
           {tab === 'content' ? <>
             <div className="admin-page-title"><div><span className="section-kicker">YOUR PUBLIC SITE</span><h1>Portfolio content</h1><p>Everything here appears on your live portfolio.</p></div><a href="/" target="_blank" rel="noreferrer" className="view-site">View site <ArrowUpRight size={15} /></a></div>
@@ -862,15 +958,41 @@ function Admin() {
               <AdminField label="LinkedIn URL" value={portfolio.profile.linkedin} onChange={(value) => updateProfile('linkedin', value)} />
               <div className="admin-image-control">
                 <div className="admin-image-preview">{heroImage ? <img src={heroImage} alt="Hero image preview" /> : <div><ImagePlus size={22} /><span>Default hero image</span></div>}</div>
-                <div className="admin-image-actions"><span className="image-field-label">HERO IMAGE</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingHero ? 'Uploading...' : heroImage ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploadingHero || uploadingProject !== null} onChange={uploadHeroImage} /></label>{heroImage && <button className="image-remove-button" onClick={() => updateProfile('heroImage', '')}>Use default image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div>
+                <div className="admin-image-actions"><span className="image-field-label">HERO IMAGE</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingHero ? 'Uploading...' : heroImage ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={busy || uploadingHero || uploadingProject !== null || uploadingCv} onChange={uploadHeroImage} /></label>{heroImage && <button className="image-remove-button" onClick={() => updateProfile('heroImage', '')}>Use default image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div>
+              </div>
+              <div className="admin-image-control admin-cv-control">
+                <div className="admin-cv-preview"><FileText size={23} /><span>{portfolio.profile.cvUrl ? 'CV ready to download' : 'No CV uploaded'}</span></div>
+                <div className="admin-image-actions"><span className="image-field-label">CV / RESUME</span><label className="image-upload-button"><FileText size={15} />{uploadingCv ? 'Uploading...' : portfolio.profile.cvUrl ? 'Replace PDF' : 'Upload PDF'}<input type="file" accept="application/pdf,.pdf" disabled={busy || uploadingCv || uploadingProject !== null || uploadingHero} onChange={uploadCv} /></label>{portfolio.profile.cvUrl && <button className="image-remove-button" onClick={() => updateProfile('cvUrl', '')}>Remove CV</button>}<span className="image-upload-hint">PDF only · up to 10 MB · Save changes to publish</span></div>
               </div>
             </div>
             <div className="admin-section-title projects-admin-title"><span>02</span><div><h2>Selected work</h2><p>Show the projects you&apos;re proud of.</p></div><button className="add-project" onClick={addProject}><Plus size={16} /> Add project</button></div>
-            <div className="admin-project-list">{portfolio.projects.map((project, index) => <article className="admin-project" key={project.id}><div className="admin-project-head"><span>PROJECT 0{index + 1}</span><button aria-label={`Delete ${project.name || 'project'}`} onClick={() => setPortfolio({ ...portfolio, projects: portfolio.projects.filter((item) => item.id !== project.id) })}><Trash2 size={16} /></button></div><div className="admin-form-grid"><div className="admin-image-control"><div className="admin-image-preview">{project.image ? <img src={apiUrl(project.image)} alt={`${project.name || 'Project'} cover preview`} /> : <div><ImagePlus size={22} /><span>No cover image</span></div>}</div><div className="admin-image-actions"><span className="image-field-label">PROJECT COVER</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingProject === project.id ? 'Uploading...' : project.image ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploadingProject !== null || uploadingHero} onChange={(event) => uploadProjectImage(project.id, event)} /></label>{project.image && <button className="image-remove-button" onClick={() => updateProject(project.id, 'image', '')}>Remove image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div></div><AdminField label="Project name" value={project.name} onChange={(value) => updateProject(project.id, 'name', value)} /><AdminField label="Category" value={project.category} onChange={(value) => updateProject(project.id, 'category', value)} /><AdminField label="Year" value={project.year} onChange={(value) => updateProject(project.id, 'year', value)} /><AdminField label="Project URL" value={project.url} onChange={(value) => updateProject(project.id, 'url', value)} /><AdminField label="Description" value={project.description} onChange={(value) => updateProject(project.id, 'description', value)} multiline wide /></div></article>)}{!portfolio.projects.length && <div className="admin-empty">No projects yet. Add one to feature it on your site.</div>}</div>
-            <div className="admin-save-bar"><span className="save-notice" role="status">{notice || error}</span><button className="admin-primary save-button" onClick={save} disabled={busy}><Save size={16} /> {busy ? 'Saving...' : 'Save changes'} <Check size={15} /></button></div>
-          </> : <>
+            <div className="admin-project-list">{portfolio.projects.map((project, index) => <article className="admin-project" key={project.id}><div className="admin-project-head"><span>PROJECT 0{index + 1}</span><button aria-label={`Delete ${project.name || 'project'}`} onClick={() => setPortfolio({ ...portfolio, projects: portfolio.projects.filter((item) => item.id !== project.id) })}><Trash2 size={16} /></button></div><div className="admin-form-grid"><div className="admin-image-control"><div className="admin-image-preview">{project.image ? <img src={apiUrl(project.image)} alt={`${project.name || 'Project'} cover preview`} /> : <div><ImagePlus size={22} /><span>No cover image</span></div>}</div><div className="admin-image-actions"><span className="image-field-label">PROJECT COVER</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingProject === project.id ? 'Uploading...' : project.image ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={busy || uploadingProject !== null || uploadingHero || uploadingCv} onChange={(event) => uploadProjectImage(project.id, event)} /></label>{project.image && <button className="image-remove-button" onClick={() => updateProject(project.id, 'image', '')}>Remove image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div></div><AdminField label="Project name" value={project.name} onChange={(value) => updateProject(project.id, 'name', value)} /><AdminField label="Category" value={project.category} onChange={(value) => updateProject(project.id, 'category', value)} /><AdminField label="Year" value={project.year} onChange={(value) => updateProject(project.id, 'year', value)} /><AdminField label="Project URL" value={project.url} onChange={(value) => updateProject(project.id, 'url', value)} /><AdminField label="Description" value={project.description} onChange={(value) => updateProject(project.id, 'description', value)} multiline wide /></div></article>)}{!portfolio.projects.length && <div className="admin-empty">No projects yet. Add one to feature it on your site.</div>}</div>
+            <div className="admin-save-bar"><span className="save-notice" role="status">{notice || error}</span><button className="admin-primary save-button" onClick={save} disabled={busy || uploadingProject !== null || uploadingHero || uploadingCv}><Save size={16} /> {busy ? 'Saving...' : 'Save changes'} <Check size={15} /></button></div>
+          </> : tab === 'messages' ? <>
             <div className="admin-page-title"><div><span className="section-kicker">CONTACT FORM</span><h1>Your messages</h1><p>Notes sent through your portfolio.</p></div><span className="inbox-total">{messages.length} {messages.length === 1 ? 'MESSAGE' : 'MESSAGES'}</span></div>
             <div className="message-list">{messages.map((message, index) => <article className="inbox-message" key={message._id || `${message.email}-${index}`}><div className="inbox-message-top"><div><span className="inbox-index">{String(index + 1).padStart(2, '0')}</span><h2>{message.name}</h2></div><time>{new Date(message.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</time></div><a className="inbox-email" href={`mailto:${message.email}`}>{message.email} <ArrowUpRight size={13} /></a><p>{message.message}</p></article>)}{!messages.length && <div className="admin-empty"><Mail size={20} /> No messages yet. They&apos;ll show up here.</div>}</div>
+          </> : <>
+            <div className="admin-page-title analytics-page-title"><div><span className="section-kicker">AUDIENCE OVERVIEW</span><h1>Website analytics</h1><p>Anonymous page and section views. Live updates every 5 seconds.</p></div><button className="analytics-reset" onClick={resetAnalytics} disabled={resettingAnalytics}><RotateCcw size={14} />{resettingAnalytics ? 'Resetting...' : 'Reset tracking'}</button></div>
+            {analyticsError && <p className="analytics-error" role="alert">{analyticsError}</p>}
+            <div className="analytics-metrics">
+              <article className="analytics-metric"><span>TOTAL PAGE VIEWS</span><strong>{analytics?.totalPageViews ?? '—'}</strong></article>
+              <article className="analytics-metric"><span>SECTION VIEWS</span><strong>{analytics?.totalSectionViews ?? '—'}</strong></article>
+              <article className="analytics-metric"><span>MOST VIEWED SECTION</span><strong>{mostViewedSection?.count ? mostViewedSection.section : '—'}</strong><small>{mostViewedSection?.count || 0} views</small></article>
+            </div>
+            <section className="analytics-panel">
+              <div className="analytics-panel-heading"><div><span className="section-kicker">LAST 7 DAYS</span><h2>Page views</h2></div><span className="analytics-live"><i /> LIVE</span></div>
+              <div className="analytics-chart" role="img" aria-label="Page views over the last seven days">
+                {(analytics?.pageViews || []).map((day) => <div className="analytics-bar-column" key={day.date}><span>{day.count}</span><div className="analytics-bar-track"><i style={{ height: `${Math.max(day.count ? 6 : 0, (day.count / maxDailyViews) * 100)}%` }} /></div><small>{day.date.slice(5)}</small></div>)}
+              </div>
+            </section>
+            <section className="analytics-panel">
+              <div className="analytics-panel-heading"><div><span className="section-kicker">ENGAGEMENT</span><h2>Views by section</h2></div></div>
+              <div className="analytics-section-list">{(analytics?.sectionViews || []).map(({ section, count }) => {
+                const maxSectionViews = Math.max(1, ...(analytics?.sectionViews || []).map((item) => item.count));
+                return <div className="analytics-section-row" key={section}><span>{section}</span><div className="analytics-section-track"><i style={{ width: `${(count / maxSectionViews) * 100}%` }} /></div><strong>{count}</strong></div>;
+              })}</div>
+              <p className="analytics-privacy-note">No names, IP addresses, or personal browsing details are stored. Each section is counted once per page visit.</p>
+            </section>
           </>}
         </section>
       </div>
