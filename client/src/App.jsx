@@ -149,11 +149,12 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authUser, setAuthUser] = useState(null);
   const [authError, setAuthError] = useState('');
+  const [adminMode, setAdminMode] = useState(false);
   const isAdmin = window.location.pathname.startsWith('/admin')
     || new URLSearchParams(window.location.search).get('admin') === '1';
 
   useEffect(() => {
-    if (isAdmin) return undefined;
+    if (isAdmin || adminMode) return undefined;
     let active = true;
     async function checkAuthentication() {
       try {
@@ -167,22 +168,22 @@ function App() {
     }
     checkAuthentication();
     return () => { active = false; };
-  }, [isAdmin]);
+  }, [adminMode, isAdmin]);
 
   useEffect(() => {
-    if (isAdmin || !authUser) return undefined;
+    if (isAdmin || adminMode || !authUser) return undefined;
     let active = true;
     api('/api/portfolio')
       .then((data) => { if (active) setPortfolio(data); })
       .catch((error) => { if (active) setLoadError(error.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [authUser, isAdmin]);
+  }, [adminMode, authUser, isAdmin]);
 
-  if (isAdmin) return <Admin />;
+  if (isAdmin || adminMode) return <Admin />;
   if (authLoading) return <EmailPasswordSignIn loading />;
-  if (!authUser) return <EmailPasswordSignIn error={authError} onSignedIn={setAuthUser} />;
-  return <PortfolioPage portfolio={portfolio} loading={loading} loadError={loadError} user={authUser} onSignOut={async () => {
+  if (!authUser) return <EmailPasswordSignIn error={authError} onSignedIn={setAuthUser} onAdminSignIn={() => setAdminMode(true)} />;
+  return <PortfolioPage portfolio={portfolio} loading={loading} loadError={loadError} user={authUser} onAdminSignIn={() => setAdminMode(true)} onSignOut={async () => {
     try {
       await api('/api/auth/logout', { method: 'POST' });
       setAuthUser(null);
@@ -193,7 +194,7 @@ function App() {
   }} />;
 }
 
-function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {} }) {
+function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {}, onAdminSignIn = () => {} }) {
   const [registering, setRegistering] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -237,12 +238,13 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
           setRegistering((current) => !current);
           setFormError('');
         }}>{registering ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>}
+        {!loading && <button className="email-login-toggle" type="button" onClick={onAdminSignIn}>Admin? Sign in with username</button>}
       </section>
     </main>
   );
 }
 
-function PortfolioPage({ portfolio, loading, loadError, user, onSignOut }) {
+function PortfolioPage({ portfolio, loading, loadError, user, onAdminSignIn, onSignOut }) {
   const { profile, projects } = portfolio;
   const [menuOpen, setMenuOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -360,7 +362,10 @@ function PortfolioPage({ portfolio, loading, loadError, user, onSignOut }) {
           <a onClick={() => setMenuOpen(false)} href="#about">About</a>
           <a onClick={() => setMenuOpen(false)} href="#stack">Stack</a>
           <a className="nav-contact" onClick={() => setMenuOpen(false)} href="#contact">Let&apos;s talk <ArrowUpRight size={14} /></a>
-          <a className="nav-admin" onClick={() => setMenuOpen(false)} href="/?admin=1"><ShieldCheck size={14} /> Admin</a>
+          <button type="button" className="nav-admin" onClick={() => {
+            setMenuOpen(false);
+            onAdminSignIn();
+          }}><ShieldCheck size={14} /> Admin</button>
         </nav>
         <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="Open quick navigation" title="Quick navigation (Ctrl or Command + K)">
           <Search size={16} /><span>Quick find</span><kbd><Command size={11} /> K</kbd>
@@ -433,7 +438,7 @@ function PortfolioPage({ portfolio, loading, loadError, user, onSignOut }) {
         </form>
       </section>
 
-      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home">EZRA<span>.</span>DEVS</a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><button className="privacy-choice-link" onClick={() => chooseAnalytics('pending')}>Privacy choices</button><span className="signed-in-user">{user.email} · <button onClick={onSignOut}>Sign out</button></span><a href="/?admin=1" className="admin-link">ADMIN <ArrowUpRight size={12} /></a></footer>
+      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home">EZRA<span>.</span>DEVS</a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><button className="privacy-choice-link" onClick={() => chooseAnalytics('pending')}>Privacy choices</button><span className="signed-in-user">{user.email} · <button onClick={onSignOut}>Sign out</button></span><button type="button" className="admin-link" onClick={onAdminSignIn}>ADMIN <ArrowUpRight size={12} /></button></footer>
       {analyticsConsent === 'pending' && <aside className="analytics-consent" aria-label="Analytics privacy choices"><p>This site can store your IP address, approximate location, and a random browser ID to count visits. Location is approximate; data is kept for up to 90 days. Your name is not collected. Allow analytics or decline.</p><div><button onClick={() => chooseAnalytics('declined')}>Decline</button><button className="analytics-consent-allow" onClick={() => chooseAnalytics('allowed')}>Allow analytics</button></div></aside>}
       <PortfolioChat profile={profile} projects={projects} loading={loading} />
       <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} profile={profile} projects={projects} />

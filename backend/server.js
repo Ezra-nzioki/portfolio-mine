@@ -117,6 +117,10 @@ const User = mongoose.model('User', new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   lastSeen: { type: Date, default: Date.now },
 }, { versionKey: false }));
+const AdminAccount = mongoose.model('AdminAccount', new mongoose.Schema({
+  username: { type: String, required: true, unique: true, maxlength: 100 },
+  passwordHash: { type: String, required: true, select: false },
+}, { versionKey: false }));
 const EmailAccount = mongoose.model('EmailAccount', new mongoose.Schema({
   name: { type: String, required: true, maxlength: 100 },
   email: { type: String, required: true, unique: true, maxlength: 200 },
@@ -181,14 +185,27 @@ async function savePortfolio(nextPortfolio) {
 }
 
 function requireAdmin(req, res, next) {
+  let adminSession;
   try {
     const token = req.cookies.ezra_admin;
     if (!token) return res.status(401).json({ error: 'Authentication required.' });
-    req.admin = jwt.verify(token, tokenSecret);
-    return next();
+    adminSession = jwt.verify(token, tokenSecret);
   } catch {
     return res.status(401).json({ error: 'Your session has expired. Please sign in again.' });
   }
+  if (!mongoose.isValidObjectId(adminSession.adminId)) {
+    return res.status(401).json({ error: 'Your session has expired. Please sign in again.' });
+  }
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Admin authentication is unavailable because MongoDB is not connected.' });
+  }
+  return AdminAccount.findById(adminSession.adminId).select('username').lean()
+    .then((admin) => {
+      if (!admin) return res.status(401).json({ error: 'Your admin account is no longer available. Please sign in again.' });
+      req.admin = { username: admin.username };
+      return next();
+    })
+    .catch(next);
 }
 
 function requireVisitor(req, res, next) {
@@ -350,24 +367,32 @@ app.post('/api/analytics/view', requireVisitor, async (req, res, next) => {
   }
 });
 
-app.post('/api/admin/login', async (req, res) => {
-  const username = process.env.ADMIN_USERNAME;
-  if (!username || !adminPasswordHash) return res.status(503).json({ error: 'Admin credentials are not configured.' });
-  const valid = typeof req.body.username === 'string'
-    && typeof req.body.password === 'string'
-    && req.body.username === username
-    && await bcrypt.compare(req.body.password, adminPasswordHash);
-  if (!valid) return res.status(401).json({ error: 'That username and password did not match.' });
-  const token = jwt.sign({ username }, tokenSecret, { expiresIn: '12h' });
-  const secureCookie = process.env.NODE_ENV === 'production'
-    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
-  res.cookie('ezra_admin', token, {
-    httpOnly: true,
-    secure: secureCookie,
-    sameSite: adminCookieSameSite,
-    maxAge: 12 * 60 * 60 * 1000,
-  });
-  return res.json({ username });
+app.post('/api/admin/login', limitAuthAttempts, async (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Admin sign-in requires an available MongoDB database.' });
+  }
+  const username = typeof req.body.username === 'string' ? req.body.username : '';
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  if (!username || username.length > 100 || !password || Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(401).json({ error: 'That username and password did not match.' });
+  }
+  try {
+    const admin = await AdminAccount.findOne({ username }).select('+passwordHash');
+    const valid = await bcrypt.compare(password, admin?.passwordHash || dummyPasswordHash);
+    if (!admin || !valid) return res.status(401).json({ error: 'That username and password did not match.' });
+    const token = jwt.sign({ adminId: admin._id.toString() }, tokenSecret, { expiresIn: '12h' });
+    const secureCookie = process.env.NODE_ENV === 'production'
+      || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
+    res.cookie('ezra_admin', token, {
+      httpOnly: true,
+      secure: secureCookie,
+      sameSite: adminCookieSameSite,
+      maxAge: 12 * 60 * 60 * 1000,
+    });
+    return res.json({ username: admin.username });
+  } catch (error) {
+    return next(error);
+  }
 });
 
 app.post('/api/admin/logout', (req, res) => {
@@ -764,6 +789,17 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Something went wrong. Please try again.' });
 });
 
+async function bootstrapAdminAccount() {
+  if (await AdminAccount.exists()) return;
+  const username = process.env.ADMIN_USERNAME;
+  if (!username || !adminPasswordHash) {
+    console.warn('No admin account exists. Set ADMIN_USERNAME and ADMIN_PASSWORD_HASH to create the initial MongoDB admin account.');
+    return;
+  }
+  await AdminAccount.create({ username, passwordHash: adminPasswordHash });
+  console.log('Created the initial admin account in MongoDB.');
+}
+
 async function startServer() {
   if (process.env.MONGODB_URI) {
     try {
@@ -776,7 +812,11 @@ async function startServer() {
       console.error('MongoDB unavailable; using temporary in-memory storage. Check the URI and Atlas network access.');
     }
   }
+  if (mongoose.connection.readyState === 1) await bootstrapAdminAccount();
   app.listen(port, () => console.log(`Portfolio API listening today on http://localhost:${port}`));
 }
 
-startServer();
+startServer().catch((error) => {
+  console.error('Failed to initialize admin authentication; the server was not started.', error);
+  process.exitCode = 1;
+});

@@ -65,7 +65,7 @@ button { color: inherit; }
 .main-nav > a span { font: 9px var(--mono); color: #a0a097; vertical-align: top; margin-left: 3px; }
 .nav-contact { display: inline-flex; align-items: center; gap: 14px; padding: 11px 15px; border: 1px solid #c9cac0; transition: background .2s, border-color .2s; }
 .nav-contact:hover { background: var(--lime); border-color: var(--lime); }
-.nav-admin { display: inline-flex; align-items: center; gap: 7px; padding: 10px 12px; border: 1px solid #c9cac0; font-size: 10px; transition: background .2s, border-color .2s; }
+.nav-admin { display: inline-flex; align-items: center; gap: 7px; padding: 10px 12px; border: 1px solid #c9cac0; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 10px; transition: background .2s, border-color .2s; }
 .nav-admin:hover { background: #e8e9df; border-color: #aeb09f; }
 .mobile-menu-button { display: none; }
 
@@ -175,7 +175,7 @@ button { color: inherit; }
 .submit-button:hover { background: #535c2f; }.submit-button:disabled { opacity: .65; cursor: wait; }
 .site-footer { min-height: 83px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); color: #7d7e75; font: 9px var(--mono); }
 .footer-mark { color: var(--ink); }.footer-mark span { font-size: 10px; padding: 2px 3px; }.footer-star { color: #98ab36; padding: 0 3px; }
-.admin-link { display: flex; align-items: center; gap: 5px; color: #77786f; font-size: 8px; }
+.admin-link { display: flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: #77786f; cursor: pointer; font: inherit; font-size: 8px; }
 .admin-link:hover { color: var(--ink); }
 .portfolio-chat { position: fixed; z-index: 20; right: 24px; bottom: 24px; display: flex; flex-direction: column; align-items: end; gap: 12px; }
 .chat-launcher { min-height: 48px; display: inline-flex; align-items: center; gap: 10px; padding: 0 16px; border: 0; background: #23271f; color: #f5f4ed; box-shadow: 0 6px 20px #20231c26; cursor: pointer; font-size: 11px; font-weight: 700; }

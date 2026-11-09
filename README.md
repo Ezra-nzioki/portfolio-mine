@@ -16,7 +16,7 @@ In a second terminal, start the Vite client:
 npm run dev --prefix client
 ```
 
-Open the Vite URL shown in the terminal. The client proxies `/api` requests to the backend on port 4000. The admin workspace is linked from the site and uses a query-string route so it works on static hosting without a rewrite rule; local credentials are configured in the ignored `backend/.env` file.
+Open the Vite URL shown in the terminal. The client proxies `/api` requests to the backend on port 4000. From the homepage sign-in screen, choose **Admin? Sign in with username** to enter the admin workspace without changing the URL. The admin workspace is also available from its query-string route, so it works on static hosting without a rewrite rule.
 
 ## Deploying the frontend
 
@@ -30,7 +30,7 @@ Visitors create an account with their name, email, and a password of at least 10
 
 Set `MONGODB_URI` in `backend/.env` to a MongoDB connection string. The API connects to the `portfolio` database before accepting requests. Add the development machine's outbound IP to Atlas Network Access; this workspace currently exits as `4.240.18.224/32` (the address may change). If Atlas is unavailable, `/api/health` reports `storage: unavailable` and database-backed reads and writes return an error instead of appearing to save. Without `MONGODB_URI`, local preview uses in-memory storage.
 
-For deployment, set `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and a persistent random `JWT_SECRET` as environment variables. Generate a password hash with:
+Admin sign-in requires MongoDB. To create the initial admin account, set `ADMIN_USERNAME` and `ADMIN_PASSWORD_HASH` (or `ADMIN_PASSWORD`) in the backend environment before starting the API. If the `adminaccounts` collection is empty, the API creates one admin record using those values; the password is stored as a bcrypt hash. Once an admin record exists, login checks the database, and changing the bootstrap environment values will not change that account's credentials. The API does not fall back to environment credentials if MongoDB is unavailable. Also set a persistent random `JWT_SECRET` for deployments. Generate a password hash with:
 
 ```bash
 node -e "console.log(require('./backend/node_modules/bcryptjs').hashSync('your-password', 12))"
