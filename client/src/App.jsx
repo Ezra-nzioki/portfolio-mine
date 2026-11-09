@@ -197,10 +197,13 @@ function App() {
 function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {}, onAdminSignIn = () => {} }) {
   const [registering, setRegistering] = useState(false);
   const [verificationPending, setVerificationPending] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [resetPending, setResetPending] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
+  const [resetCode, setResetCode] = useState('');
   const [formError, setFormError] = useState('');
   const [formNotice, setFormNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -221,6 +224,23 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
         setPassword('');
         setVerificationCode('');
         setFormNotice('Email verified. You can now sign in.');
+      } else if (resetPending) {
+        const result = await api('/api/auth/reset-password', {
+          method: 'POST',
+          body: JSON.stringify({ email, code: resetCode, password }),
+        });
+        setResetPending(false);
+        setPasswordRecovery(false);
+        setPassword('');
+        setResetCode('');
+        setFormNotice(result.message);
+      } else if (passwordRecovery) {
+        const result = await api('/api/auth/forgot-password', {
+          method: 'POST',
+          body: JSON.stringify({ email }),
+        });
+        setResetPending(true);
+        setFormNotice(result.message);
       } else if (registering) {
         const result = await api('/api/auth/register', {
           method: 'POST',
@@ -259,37 +279,80 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
     }
   }
 
+  async function resendPasswordResetCode() {
+    setBusy(true);
+    setFormError('');
+    setFormNotice('');
+    try {
+      const result = await api('/api/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      setFormNotice(result.message);
+    } catch (requestError) {
+      setFormError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function returnToLogin() {
+    setVerificationPending(false);
+    setPasswordRecovery(false);
+    setResetPending(false);
+    setRegistering(false);
+    setPassword('');
+    setVerificationCode('');
+    setResetCode('');
+    setFormError('');
+    setFormNotice('');
+  }
+
+  const isRecoveryView = passwordRecovery || resetPending;
+  const isCodeView = verificationPending || resetPending;
+
   return (
     <main className="email-login-shell">
       <a className="wordmark" href="/" aria-label="Ezra Devs home">EZRA<span>.</span>DEVS</a>
       <section className="email-login-panel">
         <span className="section-kicker">WELCOME TO THE PORTFOLIO</span>
-        <h1>{loading ? 'Checking your sign-in...' : verificationPending ? 'Check your email.' : registering ? 'Create your account.' : 'Sign in to continue.'}</h1>
+        <h1>{loading ? 'Checking your sign-in...' : verificationPending ? 'Verify your email.' : resetPending ? 'Choose a new password.' : passwordRecovery ? 'Reset your password.' : registering ? 'Create your account.' : 'Sign in to continue.'}</h1>
         <p>{verificationPending
           ? `Enter the six-digit verification code sent to ${email}. The code expires in 10 minutes.`
+          : resetPending
+            ? `Enter the password reset code sent to ${email} and choose a new password. The code expires in 10 minutes.`
+            : passwordRecovery
+              ? 'Enter the email address linked to your account. If it is registered, we will send a password reset code.'
           : 'Create an account or sign in with your email and password. New accounts must verify their email before signing in. Your name, email, IP address, and approximate location are stored until the site admin deletes your account. Location is approximate and determined locally; your IP is not sent to a lookup service.'}</p>
         {!loading && <form className="email-login-form" onSubmit={submit}>
           {verificationPending
             ? <label>Verification code<input type="text" inputMode="numeric" autoComplete="one-time-code" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" pattern="\d{6}" required /></label>
-            : <>
+            : resetPending
+              ? <>
+                <label>Reset code<input type="text" inputMode="numeric" autoComplete="one-time-code" value={resetCode} onChange={(event) => setResetCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" pattern="\d{6}" required /></label>
+                <label>New password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength="10" maxLength="72" required /></label>
+                <span className="email-login-hint">Use at least 10 characters.</span>
+              </>
+              : <>
               {registering && <label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" maxLength="100" required /></label>}
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
-              <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} minLength={registering ? 10 : undefined} maxLength="72" required /></label>
+              {!passwordRecovery && <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} minLength={registering ? 10 : undefined} maxLength="72" required /></label>}
               {registering && <span className="email-login-hint">Use at least 10 characters.</span>}
             </>}
-          <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : verificationPending ? 'Verify email' : registering ? 'Create account' : 'Sign in'} <ArrowRight size={16} /></button>
+          <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : verificationPending ? 'Verify email' : resetPending ? 'Reset password' : passwordRecovery ? 'Send reset code' : registering ? 'Create account' : 'Sign in'} <ArrowRight size={16} /></button>
         </form>}
         {(formError || error) && <span className="email-login-error" role="alert">{formError || error}</span>}
         {formNotice && <span className="email-login-status" role="status">{formNotice}</span>}
         {!loading && verificationPending && <>
           <button className="email-login-toggle" type="button" onClick={resendVerificationCode} disabled={busy}>Resend verification code</button>
-          <button className="email-login-toggle" type="button" onClick={() => {
-            setVerificationPending(false);
-            setFormError('');
-            setFormNotice('');
-          }}>Back to sign in</button>
+          <button className="email-login-toggle" type="button" onClick={returnToLogin}>Back to sign in</button>
         </>}
-        {!loading && !verificationPending && !registering && <button className="email-login-toggle" type="button" onClick={async () => {
+        {!loading && resetPending && <>
+          <button className="email-login-toggle" type="button" onClick={resendPasswordResetCode} disabled={busy}>Resend reset code</button>
+          <button className="email-login-toggle" type="button" onClick={returnToLogin}>Back to sign in</button>
+        </>}
+        {!loading && passwordRecovery && !resetPending && <button className="email-login-toggle" type="button" onClick={returnToLogin}>Back to sign in</button>}
+        {!loading && !verificationPending && !isRecoveryView && !registering && <button className="email-login-toggle" type="button" onClick={async () => {
           setBusy(true);
           setFormError('');
           setFormNotice('');
@@ -306,12 +369,17 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
             setBusy(false);
           }
         }} disabled={busy}>Need to verify? Send a code</button>}
-        {!loading && !verificationPending && <button className="email-login-toggle" type="button" onClick={() => {
+        {!loading && !isCodeView && !isRecoveryView && <button className="email-login-toggle" type="button" onClick={() => {
           setRegistering((current) => !current);
           setFormError('');
           setFormNotice('');
         }}>{registering ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>}
-        {!loading && !verificationPending && <button className="email-login-toggle" type="button" onClick={onAdminSignIn}>Admin? Sign in with username</button>}
+        {!loading && !registering && !isCodeView && !isRecoveryView && <button className="email-login-toggle" type="button" onClick={() => {
+          setPasswordRecovery(true);
+          setFormError('');
+          setFormNotice('');
+        }}>Forgot password?</button>}
+        {!loading && !isCodeView && !isRecoveryView && <button className="email-login-toggle" type="button" onClick={onAdminSignIn}>Admin? Sign in with username</button>}
       </section>
     </main>
   );

@@ -24,7 +24,20 @@ The production client reads its API base URL from `client/.env.production` (`VIT
 
 On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. Production defaults admin cookies to `SameSite=None` and marks them `Secure` for separately hosted frontend and API services. Set `ADMIN_COOKIE_SAME_SITE` only if you need to override that behavior.
 
-Visitors create an account with their name, email, and a password of at least 10 characters. The backend emails a six-digit verification code that expires after 10 minutes; users must verify their email before signing in. Configure SMTP on the backend using `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, and optionally `SMTP_USER`, `SMTP_PASS`, and `SMTP_SECURE` (true or false). Passwords and verification codes are not stored in plaintext. Password reset is not currently available. With `MONGODB_URI` configured, accounts are stored in the `emailaccounts` collection; without MongoDB, account data is temporary and is lost when the backend restarts. The backend rate-limits sign-in, registration, and verification attempts. Account names, email addresses, IP addresses, and approximate locations are retained until an admin deletes them from Admin → Users. Existing Google sign-in records remain in the legacy `users` collection and can be removed from that admin page; Google sign-in is no longer available.
+Visitors create an account with their name, email, and a password of at least 10 characters. The backend emails a six-digit verification code that expires after 10 minutes; users must verify their email before signing in. The **Forgot password?** flow sends a separate six-digit reset code to the verified email; it also expires after 10 minutes and can be used once. Passwords and verification codes are not stored in plaintext.
+
+For Gmail delivery on Render, open the backend web service's **Environment** settings and add:
+
+| Variable | Value |
+|---|---|
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `465` |
+| `SMTP_SECURE` | `true` |
+| `SMTP_FROM` | Your Gmail address (for example, `ezranzioki@gmail.com`) |
+| `SMTP_USER` | The same Gmail address |
+| `SMTP_PASS` | A Google App Password for that account (not your regular Gmail password) |
+
+Create a Google App Password in your Google Account's **Security → 2-Step Verification → App passwords** settings. Keep it secret and enter it only in Render's Environment settings, never in source control or chat. Save the settings and wait for Render to redeploy the backend before registering. With `MONGODB_URI` configured, accounts are stored in the `emailaccounts` collection; without MongoDB, account data is temporary and is lost when the backend restarts. The backend rate-limits sign-in, registration, and verification attempts. Account names, email addresses, IP addresses, and approximate locations are retained until an admin deletes them from Admin → Users. Existing Google sign-in records remain in the legacy `users` collection and can be removed from that admin page; Google sign-in is no longer available.
 
 ## MongoDB persistence
 

@@ -131,6 +131,8 @@ const EmailAccount = mongoose.model('EmailAccount', new mongoose.Schema({
   emailVerified: { type: Boolean, default: true },
   verificationCodeHash: { type: String, select: false },
   verificationCodeExpiresAt: { type: Date, select: false },
+  passwordResetCodeHash: { type: String, select: false },
+  passwordResetCodeExpiresAt: { type: Date, select: false },
   ipAddress: { type: String, required: true },
   city: { type: String, default: '' },
   region: { type: String, default: '' },
@@ -317,6 +319,29 @@ async function sendEmailVerificationCode(user, smtp = getSmtpTransporter()) {
     to: user.email,
     subject: 'Verify your portfolio account',
     text: `Hello ${user.name},\n\nYour email verification code is ${code}.\n\nIt expires in 10 minutes. If you did not request this, you can ignore this email.`,
+  });
+}
+
+async function sendPasswordResetCode(user, smtp = getSmtpTransporter()) {
+  if (!smtp) throw new Error('Password recovery email is not configured. Ask the site owner to check SMTP settings on the backend.');
+  const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const codeHash = crypto.createHmac('sha256', emailCodeSecret)
+    .update(`${user._id}:password-reset:${code}`)
+    .digest('hex');
+  if (mongoose.connection.readyState === 1) {
+    await EmailAccount.findByIdAndUpdate(user._id, {
+      $set: { passwordResetCodeHash: codeHash, passwordResetCodeExpiresAt: expiresAt },
+    });
+  } else {
+    user.passwordResetCodeHash = codeHash;
+    user.passwordResetCodeExpiresAt = expiresAt;
+  }
+  await smtp.transport.sendMail({
+    from: smtp.from,
+    to: user.email,
+    subject: 'Reset your portfolio account password',
+    text: `Hello ${user.name},\n\nYour password reset code is ${code}.\n\nIt expires in 10 minutes. If you did not request this, you can ignore this email.`,
   });
 }
 
@@ -512,6 +537,10 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
       if (mongoose.connection.readyState === 1) await EmailAccount.findByIdAndDelete(createdUser._id);
       else memoryUsers.delete(createdUser._id.toString());
     }
+    if (createdUser && typeof error.code === 'string') {
+      console.error('Verification email delivery failed:', { code: error.code, responseCode: error.responseCode });
+      return res.status(502).json({ error: 'We could not send the verification email. Check the backend SMTP settings and try again.' });
+    }
     return next(error);
   }
 });
@@ -540,10 +569,18 @@ app.post('/api/auth/verify-email', limitAuthAttempts, requireDatabase, async (re
     }
 
     if (mongoose.connection.readyState === 1) {
-      await EmailAccount.findByIdAndUpdate(user._id, {
+      const result = await EmailAccount.updateOne({
+        _id: user._id,
+        verificationCodeHash: storedHash,
+        verificationCodeExpiresAt: { $gt: new Date() },
+        emailVerified: false,
+      }, {
         $set: { emailVerified: true },
         $unset: { verificationCodeHash: 1, verificationCodeExpiresAt: 1 },
       });
+      if (result.modifiedCount !== 1) {
+        return res.status(400).json({ error: 'That verification code is invalid or expired. Request a new code and try again.' });
+      }
     } else {
       user.emailVerified = true;
       delete user.verificationCodeHash;
@@ -571,6 +608,82 @@ app.post('/api/auth/resend-verification', limitAuthAttempts, requireDatabase, as
       : [...memoryUsers.values()].find((account) => account.email === email);
     if (user?.emailVerified === false) await sendEmailVerificationCode(user, smtp);
     return res.json({ message: 'If that account needs verification, a new code has been sent.' });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async (req, res, next) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
+    return res.status(400).json({ error: 'Enter a valid email address.' });
+  }
+  const smtp = getSmtpTransporter();
+  if (!smtp) {
+    return res.status(503).json({ error: 'Password recovery email is unavailable. The site owner needs to check backend SMTP settings.' });
+  }
+
+  try {
+    const user = mongoose.connection.readyState === 1
+      ? await EmailAccount.findOne({ email })
+      : [...memoryUsers.values()].find((account) => account.email === email);
+    if (user && user.emailVerified !== false) {
+      await sendPasswordResetCode(user, smtp);
+    }
+    return res.json({ message: 'If a verified account exists for that email, a password reset code has been sent.' });
+  } catch (error) {
+    console.error('Password recovery email delivery failed:', { code: error.code, responseCode: error.responseCode });
+    return res.status(502).json({ error: 'We could not send a password recovery email. Check the backend SMTP settings and try again.' });
+  }
+});
+
+app.post('/api/auth/reset-password', limitAuthAttempts, requireDatabase, async (req, res, next) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body.code === 'string' ? req.body.code.trim() : '';
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200 || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Enter the email address and six-digit reset code.' });
+  }
+  if (password.length < 10 || Buffer.byteLength(password, 'utf8') > 72) {
+    return res.status(400).json({ error: 'Use a password of at least 10 characters and no more than 72 bytes.' });
+  }
+
+  try {
+    const user = mongoose.connection.readyState === 1
+      ? await EmailAccount.findOne({ email }).select('+passwordResetCodeHash +passwordResetCodeExpiresAt')
+      : [...memoryUsers.values()].find((account) => account.email === email);
+    const storedHash = user?.passwordResetCodeHash;
+    const expectedHash = user && crypto.createHmac('sha256', emailCodeSecret)
+      .update(`${user._id}:password-reset:${code}`)
+      .digest('hex');
+    const codeIsValid = typeof storedHash === 'string'
+      && /^[a-f\d]{64}$/i.test(storedHash)
+      && user.passwordResetCodeExpiresAt > new Date()
+      && crypto.timingSafeEqual(Buffer.from(storedHash, 'hex'), Buffer.from(expectedHash, 'hex'));
+    if (!user || user.emailVerified === false || !codeIsValid) {
+      return res.status(400).json({ error: 'That password reset code is invalid or expired. Request a new code and try again.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    if (mongoose.connection.readyState === 1) {
+      const result = await EmailAccount.updateOne({
+        _id: user._id,
+        passwordResetCodeHash: storedHash,
+        passwordResetCodeExpiresAt: { $gt: new Date() },
+        emailVerified: { $ne: false },
+      }, {
+        $set: { passwordHash },
+        $unset: { passwordResetCodeHash: 1, passwordResetCodeExpiresAt: 1 },
+      });
+      if (result.modifiedCount !== 1) {
+        return res.status(400).json({ error: 'That password reset code is invalid or expired. Request a new code and try again.' });
+      }
+    } else {
+      user.passwordHash = passwordHash;
+      delete user.passwordResetCodeHash;
+      delete user.passwordResetCodeExpiresAt;
+    }
+    return res.json({ message: 'Your password has been reset. You can now sign in.' });
   } catch (error) {
     return next(error);
   }

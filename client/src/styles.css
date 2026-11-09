@@ -871,20 +871,22 @@ body { background-color: #0F4C5C; background-image: radial-gradient(ellipse at 8
 .analytics-visitors td:nth-child(2) { font-family: var(--ui-font); }
 .email-login-shell { min-height: 100svh; display: grid; place-items: center; padding: 28px 18px; background: radial-gradient(ellipse at 75% 15%, #28361833, transparent 32rem), #0F4C5C; color: #FFFFFF; }
 .email-login-shell > .wordmark { position: absolute; top: 28px; left: 30px; }
-.email-login-panel { width: min(100%, 520px); display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: clamp(24px, 6vw, 42px); border: 1px solid #283618; background: #283618; box-shadow: 0 24px 75px #071e2a66; }
+.email-login-panel { width: min(100%, 520px); display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: clamp(24px, 6vw, 42px); border: 1px solid #ffffff24; border-radius: 18px; background: linear-gradient(145deg, #34451f, #283618 68%); box-shadow: 0 24px 75px #071e2a66; }
 .email-login-panel h1 { margin: 0; color: #FFFFFF; font-size: clamp(30px, 8vw, 42px); letter-spacing: -.05em; }
 .email-login-panel > p { margin: 0; color: #F0E5E5; font-size: 12px; line-height: 1.8; }
 .email-login-form { width: 100%; display: flex; flex-direction: column; gap: 14px; }
-.email-login-form label { display: flex; flex-direction: column; gap: 7px; color: #F0E5E5; font: 9px var(--mono); }
-.email-login-form input { width: 100%; min-height: 42px; padding: 0 11px; border: 1px solid #283618; outline: 0; background: #FFFFFF; color: #0F4C5C; font: 12px var(--ui-font); }
-.email-login-form input:focus { border-color: #FB8B24; }
+.email-login-form label { display: flex; flex-direction: column; gap: 8px; color: #F0E5E5; font: 10px var(--mono); }
+.email-login-form input { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #ffffff34; border-radius: 8px; outline: 0; background: #FFFFFF; color: #0F4C5C; font: 13px var(--ui-font); transition: border-color .2s, box-shadow .2s; }
+.email-login-form input:focus { border-color: #FB8B24; box-shadow: 0 0 0 3px #FB8B2433; }
 .email-login-hint { color: #F0E5E5; font: 8px var(--mono); }
-.email-sign-in-button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 0 15px; border: 0; background: #FB8B24; color: #0F4C5C; cursor: pointer; font-size: 11px; font-weight: 700; }
+.email-sign-in-button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 0 16px; border: 0; border-radius: 8px; background: #FB8B24; color: #0F4C5C; cursor: pointer; font-size: 11px; font-weight: 700; transition: background .2s, transform .2s; }
 .email-sign-in-button:hover:not(:disabled) { background: #FFFFFF; }.email-sign-in-button:disabled { opacity: .65; cursor: wait; }
+.email-sign-in-button:hover:not(:disabled) { transform: translateY(-1px); }
 .email-login-error { color: #FB8B24; font-size: 10px; line-height: 1.6; }
 .email-login-status { color: #F0E5E5; font-size: 10px; line-height: 1.6; }
-.email-login-toggle { border: 0; padding: 0; background: transparent; color: #F0E5E5; cursor: pointer; font: 9px var(--mono); text-decoration: underline; text-underline-offset: 3px; }
+.email-login-toggle { border: 0; padding: 0; background: transparent; color: #F0E5E5; cursor: pointer; font: 10px var(--mono); text-decoration: underline; text-underline-offset: 3px; }
 .email-login-toggle:disabled { opacity: .6; cursor: wait; }
+.email-login-toggle:hover:not(:disabled) { color: #FB8B24; }
 .signed-in-user { color: #F0E5E5; font: 8px var(--mono); }.signed-in-user button { border: 0; padding: 0; background: transparent; color: #FB8B24; cursor: pointer; font: inherit; text-decoration: underline; }
 .admin-users-table td strong { color: #FFFFFF; font-family: var(--ui-font); font-size: 10px; }
 .user-delete-button { padding: 6px 8px; border: 1px solid #283618; background: transparent; color: #FFFFFF; cursor: pointer; font-size: 8px; }.user-delete-button:hover { border-color: #FB8B24; }.user-delete-button:disabled { opacity: .6; cursor: wait; }
