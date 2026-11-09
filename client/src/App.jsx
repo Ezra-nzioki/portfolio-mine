@@ -35,8 +35,23 @@ import {
 const CONTACT_PHONE = '+254710865376';
 const CONTACT_PHONE_DISPLAY = '+254 710 865 376';
 const CONTACT_EMAIL = 'ezranzioki@gmail.com';
-const HERO_POSTER = 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=75';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const FEATURED_PROJECTS = [
+  {
+    name: 'Barber Shop Appointment Platform',
+    category: 'FULL-STACK MERN · BOOKING & PAYMENTS',
+    description: 'A full-stack MERN booking application featuring automated scheduling workflows, dynamic service menus, and direct Safaricom Daraja STK Push payment integrations.',
+    technologies: ['MongoDB', 'Express', 'React', 'Node.js', 'Daraja API'],
+    match: /barber|appointment/i,
+  },
+  {
+    name: 'Thrift District E-Commerce Storefront',
+    category: 'REACT + VITE · E-COMMERCE',
+    description: 'A responsive React + Vite monorepo storefront hosted on Render, optimized for rapid mobile visual discovery.',
+    technologies: ['React', 'Vite', 'Monorepo', 'Render'],
+    match: /thrift district|thrift/i,
+  },
+];
 
 const emptyPortfolio = {
   profile: {
@@ -120,15 +135,7 @@ function PortfolioPage({ portfolio, loading, loadError }) {
   const [commandOpen, setCommandOpen] = useState(false);
   const [contact, setContact] = useState({ name: '', email: '', message: '' });
   const [contactState, setContactState] = useState({ busy: false, message: '' });
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const progressBarRef = useRef(null);
-
-  useEffect(() => {
-    const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const updateMotionPreference = (event) => setPrefersReducedMotion(event.matches);
-    motionPreference.addEventListener('change', updateMotionPreference);
-    return () => motionPreference.removeEventListener('change', updateMotionPreference);
-  }, []);
 
   useEffect(() => {
     function handleShortcut(event) {
@@ -170,28 +177,6 @@ function PortfolioPage({ portfolio, loading, loadError }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (prefersReducedMotion || typeof IntersectionObserver === 'undefined') return undefined;
-
-    const observer = new IntersectionObserver((entries, currentObserver) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('is-visible');
-          currentObserver.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.14, rootMargin: '0px 0px -32px 0px' });
-    const targets = document.querySelectorAll('.scroll-reveal');
-
-    document.documentElement.classList.add('has-scroll-reveal');
-    targets.forEach((target) => observer.observe(target));
-
-    return () => {
-      observer.disconnect();
-      document.documentElement.classList.remove('has-scroll-reveal');
-    };
-  }, [prefersReducedMotion]);
-
   async function sendMessage(event) {
     event.preventDefault();
     setContactState({ busy: true, message: '' });
@@ -204,71 +189,89 @@ function PortfolioPage({ portfolio, loading, loadError }) {
     }
   }
 
+  const featuredProjects = FEATURED_PROJECTS.map((featured) => {
+    const storedProject = projects.find((project) => featured.match.test(project.name || ''));
+    return { ...featured, ...storedProject, name: featured.name, description: featured.description };
+  });
+  const additionalProjects = projects.filter((project) => !FEATURED_PROJECTS.some((featured) => featured.match.test(project.name || '')));
+
   return (
-    <main className="site-shell">
-      <div className="site-backdrop" aria-hidden="true">
-        <img className="site-backdrop-poster" src={HERO_POSTER} alt="" />
-      </div>
-      <div className="site-content">
+    <main className="site-shell" id="home">
       <div className="reading-progress" role="progressbar" aria-label="Page reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <span ref={progressBarRef} />
       </div>
-      <div className="topline"><span className="status-dot" /> {profile.availability || 'Open to select projects'} <span className="topline-place">Based in {profile.location || 'Nairobi, Kenya'}</span></div>
+      <div className="topline"><span className="status-dot" /> {profile.availability || 'Open to select projects'} <span className="topline-place">in {profile.location || 'Nairobi, Kenya'}</span></div>
       <header className="site-header">
-        <a className="wordmark" href="#home" aria-label={`${profile.name} home`}><span>EN</span><i>.</i></a>
+        <a className="wordmark" href="#home" aria-label="Ezra Devs home">EZRA<span>.</span>DEVS</a>
         <button className="icon-button mobile-menu-button" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button>
         <nav className={menuOpen ? 'main-nav is-open' : 'main-nav'} aria-label="Main navigation">
-          <a onClick={() => setMenuOpen(false)} href="#work">Work <span>03</span></a>
+          <a onClick={() => setMenuOpen(false)} href="#work">Work</a>
           <a onClick={() => setMenuOpen(false)} href="#about">About</a>
+          <a onClick={() => setMenuOpen(false)} href="#stack">Stack</a>
           <a className="nav-contact" onClick={() => setMenuOpen(false)} href="#contact">Let&apos;s talk <ArrowUpRight size={14} /></a>
-          <a className="nav-admin" href="/?admin=1"><ShieldCheck size={15} /> Admin</a>
         </nav>
         <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="Open quick navigation" title="Quick navigation (Ctrl or Command + K)">
           <Search size={16} /><span>Quick find</span><kbd><Command size={11} /> K</kbd>
         </button>
       </header>
 
-      <section className="hero section-wrap" id="home">
-        <div className="hero-copy scroll-reveal">
-          <div className="eyebrow"><span className="eyebrow-line" /> {profile.role || 'Full-stack developer'} <span className="eyebrow-separator">/</span> {profile.location || 'Nairobi, Kenya'}</div>
-          <h1>{profile.headline || 'Thoughtful digital products, built for the real world.'}</h1>
-          <div className="hero-bottom">
-            <p className="hero-intro">I&apos;m <strong>{profile.name || 'Ezra Nzioki'}</strong> — a developer who brings ideas to life with care, curiosity, and clean code.</p>
-            <a href="#work" className="circle-link" aria-label="Scroll to selected work"><ArrowDownRight size={22} /></a>
-          </div>
-          <div className="hero-index"><span>01</span><span className="index-rule" /><span>SCROLL TO EXPLORE</span></div>
+      <section className="hero section-wrap" aria-labelledby="hero-title">
+        <div className="hero-copy">
+          <div className="eyebrow"><span className="eyebrow-line" /> FULL-STACK DEVELOPER <span className="eyebrow-separator">/</span> NAIROBI, KENYA</div>
+          <h1 id="hero-title">{profile.headline || 'Thoughtful digital products, built for the real world.'}</h1>
+          <p className="hero-intro">I&apos;m <strong>{profile.name || 'Ezra Nzioki'}</strong> — a full-stack developer turning complex operational problems into fast, scalable MERN applications and high-impact web experiences.</p>
+          <div className="hero-actions"><a href="#work" className="button button-primary">Explore selected work <ArrowDownRight size={18} /></a><a href="#contact" className="button button-outline">Get in touch <ArrowUpRight size={17} /></a></div>
+          <div className="hero-index"><span className="status-dot" /> AVAILABLE FOR SELECT PROJECTS <span className="index-rule" /> NAIROBI, KE</div>
         </div>
-        <div className="hero-art scroll-reveal">
-          <img className="hero-art-image" src={apiUrl(profile.heroImage || HERO_POSTER)} alt={profile.heroImage ? `${profile.name || 'Portfolio'} hero image` : 'A developer working at a laptop in a bright workspace'} fetchPriority="high" />
-          <div className="art-label"><span className="art-label-icon"><Code2 size={16} /></span><span>Building with intention</span><span className="art-label-count">01 / 04</span></div>
-          <div className="art-stamp"><Sparkles size={16} /><span>GOOD<br />THINGS<br />TAKE SHAPE</span></div>
-          <span className="art-caption">CODE IN MOTION — DIGITAL THINKING</span>
+        <div className="hero-art" aria-label="Abstract code-inspired artwork">
+          <div className="hero-art-grid" />
+          <div className="hero-code-window"><div className="code-window-bar"><i /><i /><i /><span>ezra.dev / build.js</span></div><pre><span className="code-muted">01</span> <b>const</b> product = {'{'}<br /><span className="code-muted">02</span>   clarity: <em>&apos;always&apos;</em>,<br /><span className="code-muted">03</span>   performance: <em>&apos;fast&apos;</em>,<br /><span className="code-muted">04</span>   impact: <em>&apos;real&apos;</em><br /><span className="code-muted">05</span> {'}'};<br /><br /><span className="code-muted">06</span> <b>ship</b>(product); <span className="code-cursor" /></pre></div>
+          <div className="hero-art-caption"><span><Code2 size={15} /> ENGINEERED WITH INTENTION</span><span>01 / 04</span></div>
+          <span className="hero-art-orbit" aria-hidden="true" />
         </div>
       </section>
 
-      <section className="work-section section-wrap scroll-reveal" id="work">
-        <div className="section-heading"><div><span className="section-kicker">A FEW THINGS I&apos;VE MADE</span><h2>Selected work<span className="heading-period">.</span></h2></div><p>Good work starts with a good question.<br />Here are a few answers.</p></div>
-        {loading ? <div className="loading-line">Loading projects <span className="loading-pulse" /></div> : loadError ? <div className="empty-work"><Layers3 size={22} /><span>{loadError}</span></div> : projects.length ? (
-          <div className="project-grid">
-            {projects.map((project, index) => <ProjectCard key={project.id || project.name} project={project} index={index} />)}
-          </div>
-        ) : <div className="empty-work"><Layers3 size={22} /><span>New work is taking shape. Check back soon.</span></div>}
+      <section className="work-section section-wrap" id="work" aria-labelledby="work-title">
+        <div className="section-heading"><div><span className="section-kicker">SELECTED WORK · 2024—26</span><h2 id="work-title">Built to make<br /><span className="accent-text">things work better.</span></h2></div><p>Practical products for real people,<br />designed to solve real problems.</p></div>
+        {loadError && <p className="load-notice" role="status">Live project details could not load; featured work is shown below.</p>}
+        <div className="project-grid">
+          {featuredProjects.map((project, index) => (
+            <article className={`feature-card feature-card-${index + 1}`} key={project.name}>
+              <div className="feature-visual">
+                {project.image && <img className="project-cover-image" src={apiUrl(project.image)} alt="" loading="lazy" />}
+                <span className="project-number">0{index + 1} / FEATURED</span>
+                <div className={`feature-art feature-art-${index + 1}`} aria-hidden="true">
+                  {index === 0 ? <><div className="booking-top"><span>BOOK YOUR VISIT</span><span>● OPEN TODAY</span></div><div className="booking-title">The right cut.<br /><b>Right on time.</b></div><div className="booking-slots"><span>10:30</span><span>11:15</span><span>12:00</span></div><div className="booking-action">CONFIRM APPOINTMENT <ArrowUpRight size={13} /></div></> : <><div className="shop-top"><span>THRIFT DISTRICT</span><span>☰ &nbsp; BAG (0)</span></div><div className="shop-title">GOOD FINDS.<br /><b>SECOND LIFE.</b></div><div className="shop-product"><span>CURATED FINDS / 2026</span><strong>Wear it<br />your way.</strong><i>DISCOVER THE DROP ↗</i></div></>}
+                </div>
+                {project.url && <a className="project-open" href={project.url} target="_blank" rel="noreferrer" aria-label={`Visit ${project.name}`}><ArrowUpRight size={18} /></a>}
+              </div>
+              <div className="feature-info"><div className="feature-title-row"><div><span className="project-category">{project.category}</span><h3>{project.name}</h3></div><span className="project-year">{project.year || '2026'}</span></div><p>{project.description}</p><div className="tech-tags">{project.technologies.map((technology) => <span key={technology}>{technology}</span>)}</div></div>
+            </article>
+          ))}
+        </div>
+        {additionalProjects.length > 0 && <div className="additional-projects" aria-label="Additional projects">{additionalProjects.map((project, index) => <ProjectCard key={project.id || project.name} project={project} index={index + 2} />)}</div>}
         <div className="work-endnote"><span>MORE IN THE WORKS</span><span className="endnote-line" /><ArrowRight size={16} /></div>
       </section>
 
+      <CircuitBreakGame />
+
       <section className="about-section" id="about">
-        <div className="section-wrap about-inner scroll-reveal">
+        <div className="section-wrap about-inner">
           <div className="about-mark"><span>EN</span><div className="about-mark-ring" /></div>
-          <div className="about-content"><span className="section-kicker">A LITTLE ABOUT ME</span><h2>Curiosity is part<br />of the toolkit.</h2><p>{profile.bio}</p><div className="about-meta"><div><span className="meta-label">CURRENTLY</span><span>{profile.availability || 'Open to select projects'}</span></div><div><span className="meta-label">BASED IN</span><span>{profile.location || 'Nairobi, Kenya'}</span></div><div><span className="meta-label">FOCUS</span><span>Web · Product · Systems</span></div></div></div>
-          <div className="about-side-note">THINK<br />MAKE<br />REFINE<span>↘</span></div>
+          <div className="about-content"><span className="section-kicker">A LITTLE ABOUT ME</span><h2>Thoughtful by nature.<br /><span className="accent-text">Practical by design.</span></h2><p>{profile.bio || 'I turn complex ideas into clear, useful web experiences. I care about the details, the people using what I build, and the systems that make it all work.'}</p><div className="about-meta"><div><span className="meta-label">CURRENTLY</span><span>{profile.availability || 'Open to select projects'}</span></div><div><span className="meta-label">BASED IN</span><span>{profile.location || 'Nairobi, Kenya'}</span></div><div><span className="meta-label">FOCUS</span><span>Web · Product · Systems</span></div></div></div>
         </div>
       </section>
 
+      <section className="stack-section section-wrap" id="stack">
+        <div className="section-heading"><div><span className="section-kicker">TOOLS I BUILD WITH</span><h2>Full stack. <span className="accent-text">One mindset.</span></h2></div><p>From first interface to production<br />deployment, end to end.</p></div>
+        <div className="stack-grid">{['React', 'Node.js', 'Express', 'MongoDB', 'Tailwind CSS', 'REST APIs', 'Render'].map((technology, index) => <div className="stack-item" key={technology}><span>0{index + 1}</span><Code2 size={17} /><b>{technology}</b><ArrowUpRight size={15} /></div>)}</div>
+      </section>
+
       <section className="contact-section section-wrap" id="contact">
-        <div className="contact-intro scroll-reveal"><span className="section-kicker">HAVE SOMETHING IN MIND?</span><h2>Let&apos;s make<br />it <em>matter.</em></h2><p>Have a good problem to solve or an idea worth exploring? Tell me a little about it.</p>
+        <div className="contact-intro"><span className="section-kicker">HAVE SOMETHING IN MIND?</span><h2>Let&apos;s build<br />something <em>useful.</em></h2><p>Have a good problem to solve or an idea worth exploring? Tell me a little about it.</p>
           <div className="contact-links"><a href={`tel:${CONTACT_PHONE}`}><PhoneCall size={17} /> Call {CONTACT_PHONE_DISPLAY} <ArrowUpRight size={14} /></a><a href={`https://wa.me/${CONTACT_PHONE.slice(1)}`} target="_blank" rel="noreferrer"><MessageCircle size={17} /> WhatsApp Ezra <ArrowUpRight size={14} /></a><a href={`mailto:${profile.email || CONTACT_EMAIL}`}><Mail size={17} /> {profile.email || CONTACT_EMAIL} <ArrowUpRight size={14} /></a>{profile.github && <a href={profile.github} target="_blank" rel="noreferrer"><Github size={17} /> GitHub <ArrowUpRight size={14} /></a>}{profile.linkedin && <a href={profile.linkedin} target="_blank" rel="noreferrer"><ExternalLink size={16} /> LinkedIn <ArrowUpRight size={14} /></a>}</div>
         </div>
-        <form className="contact-form scroll-reveal" onSubmit={sendMessage}>
+        <form className="contact-form" onSubmit={sendMessage}>
           <label>Your name<input value={contact.name} onChange={(event) => setContact({ ...contact, name: event.target.value })} placeholder="Name" autoComplete="name" required /></label>
           <label>Email address<input type="email" value={contact.email} onChange={(event) => setContact({ ...contact, email: event.target.value })} placeholder="you@example.com" autoComplete="email" required /></label>
           <label>Your note<textarea value={contact.message} onChange={(event) => setContact({ ...contact, message: event.target.value })} placeholder="A little about what you have in mind..." rows="3" required /></label>
@@ -276,12 +279,9 @@ function PortfolioPage({ portfolio, loading, loadError }) {
         </form>
       </section>
 
-      <CircuitBreakGame />
-
-      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home"><span>EN</span><i>.</i></a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><a href="/?admin=1" className="admin-link">ADMIN <ArrowUpRight size={12} /></a></footer>
+      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home">EZRA<span>.</span>DEVS</a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><a href="/?admin=1" className="admin-link">ADMIN <ArrowUpRight size={12} /></a></footer>
       <PortfolioChat profile={profile} projects={projects} loading={loading} />
       <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} profile={profile} projects={projects} />
-      </div>
     </main>
   );
 }
