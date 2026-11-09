@@ -845,3 +845,13 @@ body { background-color: #0F4C5C; background-image: radial-gradient(ellipse at 8
   .feature-visual.has-image { height: clamp(200px, 65vw, 300px); }
   .project-visual.has-image, .additional-projects .project-visual.has-image { height: clamp(180px, 68vw, 300px); }
 }
+@media (max-width: 720px) {
+  .site-header { position: sticky; }
+  .mobile-menu-button { display: grid; flex: 0 0 38px; place-items: center; }
+  .main-nav { position: absolute; z-index: 31; top: 100%; right: 0; left: 0; display: none; flex-direction: column; align-items: stretch; gap: 0; padding: 8px 18px 14px; border: 1px solid #9A031E; background: #0F4C5C; }
+  .main-nav.is-open { display: flex; }
+  .main-nav > a:not(.nav-contact) { padding: 14px 3px; border-bottom: 1px solid #9A031E; }
+  .nav-contact { justify-content: center; margin-top: 12px; }
+  .command-trigger { flex: 0 0 auto; margin-left: auto; padding: 8px; }
+  .command-trigger > span, .command-trigger kbd { display: none; }
+}
