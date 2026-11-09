@@ -209,6 +209,7 @@ function PortfolioPage({ portfolio, loading, loadError }) {
           <a onClick={() => setMenuOpen(false)} href="#about">About</a>
           <a onClick={() => setMenuOpen(false)} href="#stack">Stack</a>
           <a className="nav-contact" onClick={() => setMenuOpen(false)} href="#contact">Let&apos;s talk <ArrowUpRight size={14} /></a>
+          <a className="nav-admin" onClick={() => setMenuOpen(false)} href="/admin"><ShieldCheck size={14} /> Admin</a>
         </nav>
         <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="Open quick navigation" title="Quick navigation (Ctrl or Command + K)">
           <Search size={16} /><span>Quick find</span><kbd><Command size={11} /> K</kbd>
