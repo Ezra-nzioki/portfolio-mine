@@ -194,6 +194,7 @@ function PortfolioPage({ portfolio, loading, loadError }) {
     return { ...featured, ...storedProject, name: featured.name, description: featured.description };
   });
   const additionalProjects = projects.filter((project) => !FEATURED_PROJECTS.some((featured) => featured.match.test(project.name || '')));
+  const heroImage = profile.heroImage ? apiUrl(profile.heroImage) : '';
 
   return (
     <main className="site-shell" id="home">
@@ -224,11 +225,13 @@ function PortfolioPage({ portfolio, loading, loadError }) {
           <div className="hero-actions"><a href="#work" className="button button-primary">Explore selected work <ArrowDownRight size={18} /></a><a href="#contact" className="button button-outline">Get in touch <ArrowUpRight size={17} /></a></div>
           <div className="hero-index"><span className="status-dot" /> AVAILABLE FOR SELECT PROJECTS <span className="index-rule" /> NAIROBI, KE</div>
         </div>
-        <div className="hero-art" aria-label="Abstract code-inspired artwork">
-          <div className="hero-art-grid" />
-          <div className="hero-code-window"><div className="code-window-bar"><i /><i /><i /><span>ezra.dev / build.js</span></div><pre><span className="code-muted">01</span> <b>const</b> product = {'{'}<br /><span className="code-muted">02</span>   clarity: <em>&apos;always&apos;</em>,<br /><span className="code-muted">03</span>   performance: <em>&apos;fast&apos;</em>,<br /><span className="code-muted">04</span>   impact: <em>&apos;real&apos;</em><br /><span className="code-muted">05</span> {'}'};<br /><br /><span className="code-muted">06</span> <b>ship</b>(product); <span className="code-cursor" /></pre></div>
+        <div className={`hero-art${heroImage ? ' has-image' : ''}`} aria-label={heroImage ? 'Portfolio hero image' : 'Abstract code-inspired artwork'}>
+          {heroImage ? <img className="hero-art-image" src={heroImage} alt={`Featured work by ${profile.name || 'Ezra Nzioki'}`} /> : <>
+            <div className="hero-art-grid" />
+            <div className="hero-code-window"><div className="code-window-bar"><i /><i /><i /><span>ezra.dev / build.js</span></div><pre><span className="code-muted">01</span> <b>const</b> product = {'{'}<br /><span className="code-muted">02</span>   clarity: <em>&apos;always&apos;</em>,<br /><span className="code-muted">03</span>   performance: <em>&apos;fast&apos;</em>,<br /><span className="code-muted">04</span>   impact: <em>&apos;real&apos;</em><br /><span className="code-muted">05</span> {'}'};<br /><br /><span className="code-muted">06</span> <b>ship</b>(product); <span className="code-cursor" /></pre></div>
+          </>}
           <div className="hero-art-caption"><span><Code2 size={15} /> ENGINEERED WITH INTENTION</span><span>01 / 04</span></div>
-          <span className="hero-art-orbit" aria-hidden="true" />
+          {!heroImage && <span className="hero-art-orbit" aria-hidden="true" />}
         </div>
       </section>
 
@@ -238,12 +241,12 @@ function PortfolioPage({ portfolio, loading, loadError }) {
         <div className="project-grid">
           {featuredProjects.map((project, index) => (
             <article className={`feature-card feature-card-${index + 1}`} key={project.name}>
-              <div className="feature-visual">
+              <div className={`feature-visual${project.image ? ' has-image' : ''}`}>
                 {project.image && <img className="project-cover-image" src={apiUrl(project.image)} alt="" loading="lazy" />}
                 <span className="project-number">0{index + 1} / FEATURED</span>
-                <div className={`feature-art feature-art-${index + 1}`} aria-hidden="true">
+                {!project.image && <div className={`feature-art feature-art-${index + 1}`} aria-hidden="true">
                   {index === 0 ? <><div className="booking-top"><span>BOOK YOUR VISIT</span><span>● OPEN TODAY</span></div><div className="booking-title">The right cut.<br /><b>Right on time.</b></div><div className="booking-slots"><span>10:30</span><span>11:15</span><span>12:00</span></div><div className="booking-action">CONFIRM APPOINTMENT <ArrowUpRight size={13} /></div></> : <><div className="shop-top"><span>THRIFT DISTRICT</span><span>☰ &nbsp; BAG (0)</span></div><div className="shop-title">GOOD FINDS.<br /><b>SECOND LIFE.</b></div><div className="shop-product"><span>CURATED FINDS / 2026</span><strong>Wear it<br />your way.</strong><i>DISCOVER THE DROP ↗</i></div></>}
-                </div>
+                </div>}
                 {project.url && <a className="project-open" href={project.url} target="_blank" rel="noreferrer" aria-label={`Visit ${project.name}`}><ArrowUpRight size={18} /></a>}
               </div>
               <div className="feature-info"><div className="feature-title-row"><div><span className="project-category">{project.category}</span><h3>{project.name}</h3></div><span className="project-year">{project.year || '2026'}</span></div><p>{project.description}</p><div className="tech-tags">{project.technologies.map((technology) => <span key={technology}>{technology}</span>)}</div></div>

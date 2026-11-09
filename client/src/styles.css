@@ -361,7 +361,8 @@ body { background: #0B0F17; color: #FFFFFF; }
 .feature-card { min-width: 0; overflow: hidden; border: 1px solid #1F2937; background: #161E2E; transition: border-color .2s, transform .2s; }
 .feature-card:hover { transform: translateY(-3px); border-color: #06B6D466; }
 .feature-visual { position: relative; height: clamp(220px, 25vw, 300px); display: grid; place-items: center; overflow: hidden; border-bottom: 1px solid #1F2937; background: #101827; }
-.feature-visual > .project-cover-image { z-index: 0; opacity: .27; }
+.feature-visual > .project-cover-image { z-index: 0; }
+.feature-visual.has-image::before { display: none; }
 .project-number { position: absolute; z-index: 2; top: 14px; left: 16px; color: #A7B2C3; font: 9px var(--mono); letter-spacing: .09em; }
 .project-open { z-index: 2; top: 12px; right: 12px; display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid #334155; background: #0B0F17; color: #06B6D4; }
 .project-open:hover { border-color: #06B6D4; background: #161E2E; }
