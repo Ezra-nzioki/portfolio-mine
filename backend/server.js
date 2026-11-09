@@ -352,8 +352,15 @@ async function sendEmail(emailService, message) {
 
 function getEmailDeliveryErrorMessage(error, purpose) {
   const emailType = purpose === 'verification' ? 'verification' : 'password recovery';
-  if (error?.code === 'EAUTH' || [401, 403, 534, 535].includes(Number(error?.responseCode))) {
-    return `The email provider rejected its credentials or sender, so the ${emailType} email could not be sent. The site owner must check the Resend API key or SMTP app password and verify the sender domain.`;
+  const responseCode = Number(error?.responseCode);
+  if (responseCode === 401) {
+    return `Resend rejected the API key, so the ${emailType} email could not be sent. Set a valid, active RESEND_API_KEY in the backend service environment and redeploy.`;
+  }
+  if ([403, 422].includes(responseCode)) {
+    return `Resend rejected the sender or request, so the ${emailType} email could not be sent. Verify the sender domain and check that RESEND_FROM exactly matches a sender authorized in the Resend account.`;
+  }
+  if (error?.code === 'EAUTH' || [534, 535].includes(responseCode)) {
+    return `The SMTP provider rejected its credentials, so the ${emailType} email could not be sent. Check the SMTP username and app password configured on the backend.`;
   }
   if (['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'ENOTFOUND', 'EHOSTUNREACH', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT'].includes(error?.code || error?.cause?.code)) {
     return `The backend could not connect to its email provider. Check outbound HTTPS connectivity for Resend, or verify the configured SMTP host and port.`;
