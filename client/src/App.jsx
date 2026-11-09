@@ -147,7 +147,6 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [authLoading, setAuthLoading] = useState(true);
-  const [googleConfigured, setGoogleConfigured] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [authError, setAuthError] = useState('');
   const isAdmin = window.location.pathname.startsWith('/admin')
@@ -158,15 +157,10 @@ function App() {
     let active = true;
     async function checkAuthentication() {
       try {
-        const config = await api('/api/auth/config');
-        if (active) setGoogleConfigured(config.googleConfigured);
         const session = await api('/api/auth/session');
         if (active) setAuthUser(session.user);
       } catch (error) {
         if (error.status !== 401 && active) setAuthError(error.message);
-        if (active && error.status === 401 && new URLSearchParams(window.location.search).has('auth_error')) {
-          setAuthError(new URLSearchParams(window.location.search).get('auth_error'));
-        }
       } finally {
         if (active) setAuthLoading(false);
       }
@@ -186,8 +180,8 @@ function App() {
   }, [authUser, isAdmin]);
 
   if (isAdmin) return <Admin />;
-  if (authLoading) return <GoogleSignIn loading />;
-  if (!authUser) return <GoogleSignIn error={authError} configured={googleConfigured} />;
+  if (authLoading) return <EmailPasswordSignIn loading />;
+  if (!authUser) return <EmailPasswordSignIn error={authError} onSignedIn={setAuthUser} />;
   return <PortfolioPage portfolio={portfolio} loading={loading} loadError={loadError} user={authUser} onSignOut={async () => {
     try {
       await api('/api/auth/logout', { method: 'POST' });
@@ -199,26 +193,50 @@ function App() {
   }} />;
 }
 
-function GoogleSignIn({ loading = false, configured = false, error = '' }) {
-  const errorMessage = {
-    cancelled: 'Google sign-in was cancelled.',
-    invalid_state: 'Your sign-in request expired. Please try again.',
-    google_failed: 'Google could not complete sign-in. Please try again.',
-    profile_unavailable: 'Google did not provide a verified name and email.',
-    ip_unavailable: 'Your sign-in could not be completed. Please try again.',
-    not_configured: 'Google sign-in is not configured on the backend.',
-  }[error] || error;
+function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {} }) {
+  const [registering, setRegistering] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [formError, setFormError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setFormError('');
+    try {
+      const result = await api(registering ? '/api/auth/register' : '/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ name, email, password }),
+      });
+      onSignedIn(result.user);
+    } catch (requestError) {
+      setFormError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <main className="google-login-shell">
+    <main className="email-login-shell">
       <a className="wordmark" href="/" aria-label="Ezra Devs home">EZRA<span>.</span>DEVS</a>
-      <section className="google-login-panel">
+      <section className="email-login-panel">
         <span className="section-kicker">WELCOME TO THE PORTFOLIO</span>
-        <h1>Sign in to continue.</h1>
-        <p>Google sign-in is required to view this site. By continuing, you agree that your Google name and email, IP address, and approximate location will be stored in the site database. Your account record remains until the site admin deletes it. Location is approximate and determined locally; visitor IPs are not sent to a lookup service.</p>
-        {loading ? <span className="google-login-status" role="status">Checking your sign-in...</span>
-          : configured ? <a className="google-sign-in-button" href={apiUrl('/api/auth/google')}>Continue with Google <ArrowRight size={16} /></a>
-            : <span className="google-login-status" role="alert">Google sign-in is not configured yet. Ask the site owner to finish setup.</span>}
-        {errorMessage && <span className="google-login-error" role="alert">{errorMessage}</span>}
+        <h1>{loading ? 'Checking your sign-in...' : registering ? 'Create your account.' : 'Sign in to continue.'}</h1>
+        <p>Create an account or sign in with your email and password. Your name, email, IP address, and approximate location are stored until the site admin deletes your account. Location is approximate and determined locally; your IP is not sent to a lookup service. Email addresses are not verified.</p>
+        {!loading && <form className="email-login-form" onSubmit={submit}>
+          {registering && <label>Name<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" maxLength="100" required /></label>}
+          <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
+          <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={registering ? 'new-password' : 'current-password'} minLength="10" maxLength="72" required /></label>
+          {registering && <span className="email-login-hint">Use at least 10 characters.</span>}
+          <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : registering ? 'Create account' : 'Sign in'} <ArrowRight size={16} /></button>
+        </form>}
+        {(formError || error) && <span className="email-login-error" role="alert">{formError || error}</span>}
+        {!loading && <button className="email-login-toggle" type="button" onClick={() => {
+          setRegistering((current) => !current);
+          setFormError('');
+        }}>{registering ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>}
       </section>
     </main>
   );
@@ -979,13 +997,14 @@ function Admin() {
     }
   }
 
-  async function deleteUser(id) {
+  async function deleteUser(id, provider) {
     if (!window.confirm('Permanently delete this user record?')) return;
-    setDeletingUser(id);
+    const userKey = `${provider}-${id}`;
+    setDeletingUser(userKey);
     setUsersError('');
     try {
-      await api(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      setRegisteredUsers((current) => current.filter((registeredUser) => registeredUser._id !== id));
+      await api(`/api/admin/users/${encodeURIComponent(id)}?provider=${encodeURIComponent(provider)}`, { method: 'DELETE' });
+      setRegisteredUsers((current) => current.filter((registeredUser) => `${registeredUser.provider}-${registeredUser._id}` !== userKey));
     } catch (requestError) {
       setUsersError(requestError.message);
     } finally {
@@ -1103,11 +1122,14 @@ function Admin() {
             <div className="admin-page-title"><div><span className="section-kicker">CONTACT FORM</span><h1>Your messages</h1><p>Notes sent through your portfolio.</p></div><span className="inbox-total">{messages.length} {messages.length === 1 ? 'MESSAGE' : 'MESSAGES'}</span></div>
             <div className="message-list">{messages.map((message, index) => <article className="inbox-message" key={message._id || `${message.email}-${index}`}><div className="inbox-message-top"><div><span className="inbox-index">{String(index + 1).padStart(2, '0')}</span><h2>{message.name}</h2></div><time>{new Date(message.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</time></div><a className="inbox-email" href={`mailto:${message.email}`}>{message.email} <ArrowUpRight size={13} /></a><p>{message.message}</p></article>)}{!messages.length && <div className="admin-empty"><Mail size={20} /> No messages yet. They&apos;ll show up here.</div>}</div>
           </> : tab === 'users' ? <>
-            <div className="admin-page-title"><div><span className="section-kicker">GOOGLE SIGN-INS</span><h1>Registered users</h1><p>User records are retained until you delete them.</p></div><span className="inbox-total">{registeredUsers.length} USERS</span></div>
+            <div className="admin-page-title"><div><span className="section-kicker">VISITOR ACCOUNTS</span><h1>Registered users</h1><p>User records are retained until you delete them.</p></div><span className="inbox-total">{registeredUsers.length} USERS</span></div>
             {usersError && <p className="analytics-error" role="alert">{usersError}</p>}
             <div className="analytics-visitors-wrap"><table className="analytics-visitors admin-users-table"><thead><tr><th>Name / email</th><th>IP address</th><th>Approx. location</th><th>Sign-ins</th><th>Last seen</th><th>Action</th></tr></thead><tbody>
-              {registeredUsers.map((registeredUser) => <tr key={registeredUser._id}><td><strong>{registeredUser.name}</strong><br />{registeredUser.email}</td><td>{registeredUser.ipAddress}</td><td>{[registeredUser.city, registeredUser.region, registeredUser.country].filter(Boolean).join(', ') || 'Unknown'}</td><td>{registeredUser.loginCount}</td><td>{new Date(registeredUser.lastSeen).toLocaleString()}</td><td><button className="user-delete-button" onClick={() => deleteUser(registeredUser._id)} disabled={deletingUser === registeredUser._id}>{deletingUser === registeredUser._id ? 'Deleting...' : 'Delete'}</button></td></tr>)}
-              {!registeredUsers.length && <tr><td colSpan="6">No Google users have signed in yet.</td></tr>}
+              {registeredUsers.map((registeredUser) => {
+                const userKey = `${registeredUser.provider}-${registeredUser._id}`;
+                return <tr key={userKey}><td><strong>{registeredUser.name}</strong><br />{registeredUser.email}</td><td>{registeredUser.ipAddress}</td><td>{[registeredUser.city, registeredUser.region, registeredUser.country].filter(Boolean).join(', ') || 'Unknown'}</td><td>{registeredUser.loginCount}</td><td>{new Date(registeredUser.lastSeen).toLocaleString()}</td><td><button className="user-delete-button" onClick={() => deleteUser(registeredUser._id, registeredUser.provider)} disabled={deletingUser === userKey}>{deletingUser === userKey ? 'Deleting...' : 'Delete'}</button></td></tr>;
+              })}
+              {!registeredUsers.length && <tr><td colSpan="6">No visitor accounts have been created yet.</td></tr>}
             </tbody></table></div>
           </> : <>
             <div className="admin-page-title analytics-page-title"><div><span className="section-kicker">AUDIENCE OVERVIEW</span><h1>Website analytics</h1><p>Consent-based visitor and section views. Live updates every 5 seconds.</p></div><button className="analytics-reset" onClick={resetAnalytics} disabled={resettingAnalytics}><RotateCcw size={14} />{resettingAnalytics ? 'Resetting...' : 'Reset tracking'}</button></div>

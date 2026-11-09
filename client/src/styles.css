@@ -869,14 +869,20 @@ body { background-color: #0F4C5C; background-image: radial-gradient(ellipse at 8
 .analytics-visitors th { color: #E5D8D8; font: 8px var(--mono); text-transform: uppercase; }
 .analytics-visitors td { font-family: var(--mono); }
 .analytics-visitors td:nth-child(2) { font-family: var(--ui-font); }
-.google-login-shell { min-height: 100svh; display: grid; place-items: center; padding: 28px 18px; background: radial-gradient(ellipse at 75% 15%, #5F0F4033, transparent 32rem), #0F4C5C; color: #FFFFFF; }
-.google-login-shell > .wordmark { position: absolute; top: 28px; left: 30px; }
-.google-login-panel { width: min(100%, 520px); display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: clamp(24px, 6vw, 42px); border: 1px solid #9A031E; background: #5F0F40; box-shadow: 0 24px 75px #071e2a66; }
-.google-login-panel h1 { margin: 0; color: #FFFFFF; font-size: clamp(30px, 8vw, 42px); letter-spacing: -.05em; }
-.google-login-panel > p { margin: 0; color: #F0E5E5; font-size: 12px; line-height: 1.8; }
-.google-sign-in-button { min-height: 44px; display: inline-flex; align-items: center; gap: 12px; padding: 0 15px; background: #FB8B24; color: #0F4C5C; font-size: 11px; font-weight: 700; }
-.google-sign-in-button:hover { background: #FFFFFF; }
-.google-login-status, .google-login-error { color: #F0E5E5; font-size: 10px; line-height: 1.6; }.google-login-error { color: #FB8B24; }
+.email-login-shell { min-height: 100svh; display: grid; place-items: center; padding: 28px 18px; background: radial-gradient(ellipse at 75% 15%, #5F0F4033, transparent 32rem), #0F4C5C; color: #FFFFFF; }
+.email-login-shell > .wordmark { position: absolute; top: 28px; left: 30px; }
+.email-login-panel { width: min(100%, 520px); display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: clamp(24px, 6vw, 42px); border: 1px solid #9A031E; background: #5F0F40; box-shadow: 0 24px 75px #071e2a66; }
+.email-login-panel h1 { margin: 0; color: #FFFFFF; font-size: clamp(30px, 8vw, 42px); letter-spacing: -.05em; }
+.email-login-panel > p { margin: 0; color: #F0E5E5; font-size: 12px; line-height: 1.8; }
+.email-login-form { width: 100%; display: flex; flex-direction: column; gap: 14px; }
+.email-login-form label { display: flex; flex-direction: column; gap: 7px; color: #F0E5E5; font: 9px var(--mono); }
+.email-login-form input { width: 100%; min-height: 42px; padding: 0 11px; border: 1px solid #9A031E; outline: 0; background: #FFFFFF; color: #0F4C5C; font: 12px var(--ui-font); }
+.email-login-form input:focus { border-color: #FB8B24; }
+.email-login-hint { color: #F0E5E5; font: 8px var(--mono); }
+.email-sign-in-button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 0 15px; border: 0; background: #FB8B24; color: #0F4C5C; cursor: pointer; font-size: 11px; font-weight: 700; }
+.email-sign-in-button:hover:not(:disabled) { background: #FFFFFF; }.email-sign-in-button:disabled { opacity: .65; cursor: wait; }
+.email-login-error { color: #FB8B24; font-size: 10px; line-height: 1.6; }
+.email-login-toggle { border: 0; padding: 0; background: transparent; color: #F0E5E5; cursor: pointer; font: 9px var(--mono); text-decoration: underline; text-underline-offset: 3px; }
 .signed-in-user { color: #F0E5E5; font: 8px var(--mono); }.signed-in-user button { border: 0; padding: 0; background: transparent; color: #FB8B24; cursor: pointer; font: inherit; text-decoration: underline; }
 .admin-users-table td strong { color: #FFFFFF; font-family: var(--ui-font); font-size: 10px; }
 .user-delete-button { padding: 6px 8px; border: 1px solid #9A031E; background: transparent; color: #FFFFFF; cursor: pointer; font-size: 8px; }.user-delete-button:hover { border-color: #FB8B24; }.user-delete-button:disabled { opacity: .6; cursor: wait; }
@@ -886,5 +892,5 @@ body { background-color: #0F4C5C; background-image: radial-gradient(ellipse at 8
   .analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-sidebar { display: flex; flex-direction: row; overflow-x: auto; gap: 5px; padding: 8px; }
   .sidebar-tab { flex: 0 0 auto; }
-  .google-login-shell > .wordmark { top: 18px; left: 18px; }
+  .email-login-shell > .wordmark { top: 18px; left: 18px; }
 }
