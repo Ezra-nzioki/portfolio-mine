@@ -1109,7 +1109,6 @@ function Admin() {
               {!registeredUsers.length && <tr><td colSpan="6">No Google users have signed in yet.</td></tr>}
             </tbody></table></div>
           </> : <>
-          </> : <>
             <div className="admin-page-title analytics-page-title"><div><span className="section-kicker">AUDIENCE OVERVIEW</span><h1>Website analytics</h1><p>Consent-based visitor and section views. Live updates every 5 seconds.</p></div><button className="analytics-reset" onClick={resetAnalytics} disabled={resettingAnalytics}><RotateCcw size={14} />{resettingAnalytics ? 'Resetting...' : 'Reset tracking'}</button></div>
             {analyticsError && <p className="analytics-error" role="alert">{analyticsError}</p>}
             <div className="analytics-metrics">
