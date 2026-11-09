@@ -307,21 +307,46 @@ function getEmailService() {
     if (!resendApiKey || !resendFrom) return null;
     return {
       from: resendFrom,
-      transport: nodemailer.createTransport({
-        host: 'smtp.resend.com',
-        port: 2587,
-        secure: false,
-        auth: { user: 'resend', pass: resendApiKey },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000,
-      }),
+      send: (message) => sendResendEmail(resendApiKey, message),
     };
   }
   return getSmtpTransporter();
 }
 
+async function sendResendEmail(apiKey, message) {
+  let response;
+  try {
+    response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: message.from,
+        to: [message.to],
+        subject: message.subject,
+        text: message.text,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch (cause) {
+    const error = new Error('Could not connect to the Resend API.', { cause });
+    error.code = cause.code || cause.cause?.code;
+    throw error;
+  }
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.message || `Resend API request failed with status ${response.status}.`);
+    error.responseCode = response.status;
+    throw error;
+  }
+  return result;
+}
+
 async function sendEmail(emailService, message) {
+  if (emailService.send) return emailService.send(message);
   return emailService.transport.sendMail(message);
 }
 
@@ -330,8 +355,8 @@ function getEmailDeliveryErrorMessage(error, purpose) {
   if (error?.code === 'EAUTH' || [401, 403, 534, 535].includes(Number(error?.responseCode))) {
     return `The email provider rejected its credentials or sender, so the ${emailType} email could not be sent. The site owner must check the Resend API key or SMTP app password and verify the sender domain.`;
   }
-  if (['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'ENOTFOUND', 'EHOSTUNREACH', 'EAI_AGAIN'].includes(error?.code)) {
-    return `The backend could not connect to its email provider. On Render Free, use Resend SMTP on port 2587; outbound SMTP ports 25, 465, and 587 are blocked.`;
+  if (['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'ENOTFOUND', 'EHOSTUNREACH', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT'].includes(error?.code || error?.cause?.code)) {
+    return `The backend could not connect to its email provider. Check outbound HTTPS connectivity for Resend, or verify the configured SMTP host and port.`;
   }
   return `The ${emailType} email could not be sent. The site owner should check the backend email service settings.`;
 }

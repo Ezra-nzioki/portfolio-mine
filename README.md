@@ -26,16 +26,16 @@ On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a c
 
 Visitors create an account with their name, email, and a password of at least 6 characters. The backend emails a six-digit verification code that expires after 10 minutes; users must verify their email before signing in. The **Forgot password?** flow sends a separate six-digit reset code to the verified email; it also expires after 10 minutes and can be used once. Passwords and verification codes are not stored in plaintext.
 
-Email verification and password recovery require a backend email provider. **Render Free web services cannot send outbound SMTP on ports 25, 465, or 587.** Therefore, Gmail SMTP will not work on a Render Free backend even with a correct Google App Password. Use the Resend HTTPS API described below, or host the backend somewhere that permits SMTP.
+Email verification and password recovery require a backend email provider. **Render Free web services cannot send outbound SMTP on ports 25, 465, or 587.** Therefore, Gmail SMTP will not work on a Render Free backend even with a correct Google App Password. The backend uses Resend's HTTPS API on Render; use SMTP only on a host that permits it.
 
-For Render Free, configure Resend SMTP in the backend service's **Environment** settings:
+For Render Free, configure Resend in the backend service's **Environment** settings:
 
 | Variable | Value |
 |---|---|
 | `RESEND_API_KEY` | An API key created in your Resend account |
 | `RESEND_FROM` | A sender such as `Portfolio <accounts@your-verified-domain.com>` |
 
-Verify the sender domain in Resend before using it. Add these values to Render's backend service environment (not the frontend and not source control), save, and wait for the backend to redeploy. Nodemailer connects to Resend at `smtp.resend.com` on port `2587` using the API key as its SMTP password. Render Free blocks outbound SMTP on ports 25, 465, and 587, but not 2587 according to its documented restriction. When either Resend setting is present, both are required; otherwise the backend can use the configured SMTP fallback.
+Verify the sender domain in Resend before using it. Add these values to Render's backend service environment (not the frontend and not source control), save, and wait for the backend to redeploy. The backend sends email through Resend's HTTPS API, so no SMTP port or SMTP password is needed. When either Resend setting is present, both are required; otherwise the backend can use the configured SMTP fallback.
 
 On a host that permits SMTP, Gmail can instead be configured in the backend service's **Environment** settings:
 
