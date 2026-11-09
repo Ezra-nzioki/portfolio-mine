@@ -294,7 +294,7 @@ async function startServer() {
         dbName: process.env.MONGODB_DB || 'portfolio',
         serverSelectionTimeoutMS: 10000,
       });
-      console.log('Connected to MongoDB');
+      console.log('Connected to MongoDB yebo!');
     } catch {
       console.error('MongoDB unavailable; using temporary in-memory storage. Check the URI and Atlas network access.');
     }
