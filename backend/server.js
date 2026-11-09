@@ -292,6 +292,9 @@ function getSmtpTransporter() {
       secure: secureSetting
         ? secureSetting === 'true'
         : port === 465,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
       ...(username ? { auth: { user: username, pass: password } } : {}),
     }),
   };
@@ -500,7 +503,6 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
     return res.status(503).json({ error: 'Email verification is not configured. Ask the site owner to configure SMTP on the backend.' });
   }
 
-  let createdUser;
   try {
     const ipAddress = req.ip?.replace(/^::ffff:/, '');
     if (!ipAddress) return res.status(400).json({ error: 'Your sign-up could not be completed. Please try again.' });
@@ -528,19 +530,17 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
         memoryUsers.set(id, memoryUser);
         return memoryUser;
       })();
-    createdUser = user;
-    await sendEmailVerificationCode(user, smtp);
+    try {
+      await sendEmailVerificationCode(user, smtp);
+    } catch (error) {
+      console.error('Verification email delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
+      if (mongoose.connection.readyState === 1) await EmailAccount.findByIdAndDelete(user._id);
+      else memoryUsers.delete(user._id.toString());
+      return res.status(502).json({ error: 'Could not send the verification email. Check the SMTP host, port, app password, and hosting provider SMTP restrictions, then try again.' });
+    }
     return res.status(201).json({ message: 'A verification code has been sent to your email address.' });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ error: 'An account with this email already exists.' });
-    if (createdUser) {
-      if (mongoose.connection.readyState === 1) await EmailAccount.findByIdAndDelete(createdUser._id);
-      else memoryUsers.delete(createdUser._id.toString());
-    }
-    if (createdUser && typeof error.code === 'string') {
-      console.error('Verification email delivery failed:', { code: error.code, responseCode: error.responseCode });
-      return res.status(502).json({ error: 'We could not send the verification email. Check the backend SMTP settings and try again.' });
-    }
     return next(error);
   }
 });
@@ -609,7 +609,8 @@ app.post('/api/auth/resend-verification', limitAuthAttempts, requireDatabase, as
     if (user?.emailVerified === false) await sendEmailVerificationCode(user, smtp);
     return res.json({ message: 'If that account needs verification, a new code has been sent.' });
   } catch (error) {
-    return next(error);
+    console.error('Verification code resend failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
+    return res.status(502).json({ error: 'Could not send a new verification email. Check the SMTP settings and try again.' });
   }
 });
 

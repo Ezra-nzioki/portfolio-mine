@@ -75,32 +75,51 @@ const emptyPortfolio = {
 };
 
 async function api(path, options = {}) {
-  const headers = { ...options.headers };
-  if (options.body !== undefined && !Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')) {
+  const { headers: requestHeaders = {}, signal, timeoutMs, ...fetchOptions } = options;
+  const headers = { ...requestHeaders };
+  if (fetchOptions.body !== undefined && !Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')) {
     headers['Content-Type'] = 'application/json';
   }
-  const response = await fetch(apiUrl(path), {
-    ...options,
-    credentials: 'include',
-    headers,
-  });
-  if (response.status === 204) return null;
-  const responseText = await response.text();
-  let data;
   try {
-    data = responseText ? JSON.parse(responseText) : null;
-  } catch {
-    if (!response.ok) {
-      throw new Error(`API request failed (${response.status}) at ${response.url}: ${responseText.trim().slice(0, 200) || response.statusText}`);
+    const requestTimeout = timeoutMs ?? (/^\/api\/auth\//.test(path) || path === '/api/admin/login' ? 25000 : 0);
+    const controller = requestTimeout ? new AbortController() : null;
+    const timer = controller ? window.setTimeout(() => controller.abort(), requestTimeout) : null;
+    try {
+      const response = await fetch(apiUrl(path), {
+        ...fetchOptions,
+        credentials: 'include',
+        headers,
+        ...(controller ? { signal: controller.signal } : signal ? { signal } : {}),
+      });
+      if (response.status === 204) return null;
+      const responseText = await response.text();
+      let data;
+      try {
+        data = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        if (!response.ok) {
+          throw new Error(`API request failed (${response.status}) at ${response.url}: ${responseText.trim().slice(0, 200) || response.statusText}`);
+        }
+        throw new Error(`API returned a non-JSON response (${response.status}) from ${response.url}. Check the deployed API URL.`);
+      }
+      if (!response.ok) {
+        const error = new Error(data?.error || 'Something went wrong.');
+        error.status = response.status;
+        throw error;
+      }
+      return data;
+    } finally {
+      if (timer !== null) window.clearTimeout(timer);
     }
-    throw new Error(`API returned a non-JSON response (${response.status}) from ${response.url}. Check the deployed API URL.`);
-  }
-  if (!response.ok) {
-    const error = new Error(data?.error || 'Something went wrong.');
-    error.status = response.status;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('The server took too long to respond. Check the email service settings and try again.');
+    }
+    if (error instanceof TypeError) {
+      throw new Error('Could not connect to the server. Check your connection and try again.');
+    }
     throw error;
   }
-  return data;
 }
 
 function apiUrl(path) {
