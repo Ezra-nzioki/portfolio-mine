@@ -32,6 +32,7 @@ import {
   Sparkles,
   RotateCcw,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 
@@ -39,6 +40,8 @@ const CONTACT_PHONE = '+254710865376';
 const CONTACT_PHONE_DISPLAY = '+254 710 865 376';
 const CONTACT_EMAIL = 'ezranzioki@gmail.com';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const ANALYTICS_CONSENT_KEY = 'ezra_analytics_consent';
+const ANALYTICS_VISITOR_KEY = 'ezra_analytics_visitor';
 const FEATURED_PROJECTS = [
   {
     name: 'Barber Shop Appointment Platform',
@@ -92,13 +95,39 @@ async function api(path, options = {}) {
     }
     throw new Error(`API returned a non-JSON response (${response.status}) from ${response.url}. Check the deployed API URL.`);
   }
-  if (!response.ok) throw new Error(data?.error || 'Something went wrong.');
+  if (!response.ok) {
+    const error = new Error(data?.error || 'Something went wrong.');
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
 function apiUrl(path) {
   if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(path)) return path;
   return `${API_BASE_URL}${path}`;
+}
+
+function getAnalyticsConsent() {
+  try {
+    const savedConsent = window.localStorage.getItem(ANALYTICS_CONSENT_KEY);
+    return savedConsent === 'allowed' || savedConsent === 'declined' ? savedConsent : 'pending';
+  } catch {
+    return 'pending';
+  }
+}
+
+function getAnalyticsVisitorId() {
+  try {
+    let visitorId = window.localStorage.getItem(ANALYTICS_VISITOR_KEY);
+    if (!visitorId) {
+      visitorId = window.crypto.randomUUID();
+      window.localStorage.setItem(ANALYTICS_VISITOR_KEY, visitorId);
+    }
+    return visitorId;
+  } catch {
+    return window.crypto.randomUUID();
+  }
 }
 
 function getKenyanGreeting() {
@@ -116,28 +145,91 @@ function App() {
   const [portfolio, setPortfolio] = useState(emptyPortfolio);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [authLoading, setAuthLoading] = useState(true);
+  const [googleConfigured, setGoogleConfigured] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authError, setAuthError] = useState('');
   const isAdmin = window.location.pathname.startsWith('/admin')
     || new URLSearchParams(window.location.search).get('admin') === '1';
 
   useEffect(() => {
+    if (isAdmin) return undefined;
+    let active = true;
+    async function checkAuthentication() {
+      try {
+        const config = await api('/api/auth/config');
+        if (active) setGoogleConfigured(config.googleConfigured);
+        const session = await api('/api/auth/session');
+        if (active) setAuthUser(session.user);
+      } catch (error) {
+        if (error.status !== 401 && active) setAuthError(error.message);
+        if (active && error.status === 401 && new URLSearchParams(window.location.search).has('auth_error')) {
+          setAuthError(new URLSearchParams(window.location.search).get('auth_error'));
+        }
+      } finally {
+        if (active) setAuthLoading(false);
+      }
+    }
+    checkAuthentication();
+    return () => { active = false; };
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin || !authUser) return undefined;
     let active = true;
     api('/api/portfolio')
       .then((data) => { if (active) setPortfolio(data); })
       .catch((error) => { if (active) setLoadError(error.message); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [authUser, isAdmin]);
 
   if (isAdmin) return <Admin />;
-  return <PortfolioPage portfolio={portfolio} loading={loading} loadError={loadError} />;
+  if (authLoading) return <GoogleSignIn loading />;
+  if (!authUser) return <GoogleSignIn error={authError} configured={googleConfigured} />;
+  return <PortfolioPage portfolio={portfolio} loading={loading} loadError={loadError} user={authUser} onSignOut={async () => {
+    try {
+      await api('/api/auth/logout', { method: 'POST' });
+      setAuthUser(null);
+      setLoading(true);
+    } catch (error) {
+      setLoadError(error.message);
+    }
+  }} />;
 }
 
-function PortfolioPage({ portfolio, loading, loadError }) {
+function GoogleSignIn({ loading = false, configured = false, error = '' }) {
+  const errorMessage = {
+    cancelled: 'Google sign-in was cancelled.',
+    invalid_state: 'Your sign-in request expired. Please try again.',
+    google_failed: 'Google could not complete sign-in. Please try again.',
+    profile_unavailable: 'Google did not provide a verified name and email.',
+    ip_unavailable: 'Your sign-in could not be completed. Please try again.',
+    not_configured: 'Google sign-in is not configured on the backend.',
+  }[error] || error;
+  return (
+    <main className="google-login-shell">
+      <a className="wordmark" href="/" aria-label="Ezra Devs home">EZRA<span>.</span>DEVS</a>
+      <section className="google-login-panel">
+        <span className="section-kicker">WELCOME TO THE PORTFOLIO</span>
+        <h1>Sign in to continue.</h1>
+        <p>Google sign-in is required to view this site. By continuing, you agree that your Google name and email, IP address, and approximate location will be stored in the site database. Your account record remains until the site admin deletes it. Location is approximate and determined locally; visitor IPs are not sent to a lookup service.</p>
+        {loading ? <span className="google-login-status" role="status">Checking your sign-in...</span>
+          : configured ? <a className="google-sign-in-button" href={apiUrl('/api/auth/google')}>Continue with Google <ArrowRight size={16} /></a>
+            : <span className="google-login-status" role="alert">Google sign-in is not configured yet. Ask the site owner to finish setup.</span>}
+        {errorMessage && <span className="google-login-error" role="alert">{errorMessage}</span>}
+      </section>
+    </main>
+  );
+}
+
+function PortfolioPage({ portfolio, loading, loadError, user, onSignOut }) {
   const { profile, projects } = portfolio;
   const [menuOpen, setMenuOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [contact, setContact] = useState({ name: '', email: '', message: '' });
   const [contactState, setContactState] = useState({ busy: false, message: '' });
+  const [analyticsConsent, setAnalyticsConsent] = useState(getAnalyticsConsent);
   const progressBarRef = useRef(null);
 
   useEffect(() => {
@@ -153,10 +245,12 @@ function PortfolioPage({ portfolio, loading, loadError }) {
   }, []);
 
   useEffect(() => {
+    if (analyticsConsent !== 'allowed') return undefined;
+    const visitorId = getAnalyticsVisitorId();
     const sendView = (type, section) => {
       api('/api/analytics/view', {
         method: 'POST',
-        body: JSON.stringify(section ? { type, section } : { type }),
+        body: JSON.stringify(section ? { type, section, visitorId } : { type, visitorId }),
       }).catch((error) => console.error('Analytics tracking failed:', error));
     };
     sendView('page');
@@ -175,7 +269,16 @@ function PortfolioPage({ portfolio, loading, loadError }) {
       if (section) observer.observe(section);
     });
     return () => observer.disconnect();
-  }, []);
+  }, [analyticsConsent]);
+
+  function chooseAnalytics(consent) {
+    try {
+      window.localStorage.setItem(ANALYTICS_CONSENT_KEY, consent);
+    } catch (error) {
+      console.error('Could not save analytics preference:', error);
+    }
+    setAnalyticsConsent(consent);
+  }
 
   useEffect(() => {
     let frame = 0;
@@ -311,7 +414,8 @@ function PortfolioPage({ portfolio, loading, loadError }) {
         </form>
       </section>
 
-      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home">EZRA<span>.</span>DEVS</a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><a href="/?admin=1" className="admin-link">ADMIN <ArrowUpRight size={12} /></a></footer>
+      <footer className="site-footer section-wrap"><a className="wordmark footer-mark" href="#home">EZRA<span>.</span>DEVS</a><span>Designed &amp; built by {profile.name || 'Ezra Nzioki'} <span className="footer-star">✳</span> {new Date().getFullYear()}</span><button className="privacy-choice-link" onClick={() => chooseAnalytics('pending')}>Privacy choices</button><span className="signed-in-user">{user.email} · <button onClick={onSignOut}>Sign out</button></span><a href="/?admin=1" className="admin-link">ADMIN <ArrowUpRight size={12} /></a></footer>
+      {analyticsConsent === 'pending' && <aside className="analytics-consent" aria-label="Analytics privacy choices"><p>This site can store your IP address, approximate location, and a random browser ID to count visits. Location is approximate; data is kept for up to 90 days. Your name is not collected. Allow analytics or decline.</p><div><button onClick={() => chooseAnalytics('declined')}>Decline</button><button className="analytics-consent-allow" onClick={() => chooseAnalytics('allowed')}>Allow analytics</button></div></aside>}
       <PortfolioChat profile={profile} projects={projects} loading={loading} />
       <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} profile={profile} projects={projects} />
     </main>
@@ -764,6 +868,9 @@ function Admin() {
   const [login, setLogin] = useState({ username: '', password: '' });
   const [portfolio, setPortfolio] = useState(emptyPortfolio);
   const [messages, setMessages] = useState([]);
+  const [registeredUsers, setRegisteredUsers] = useState([]);
+  const [usersError, setUsersError] = useState('');
+  const [deletingUser, setDeletingUser] = useState('');
   const [analytics, setAnalytics] = useState(null);
   const [analyticsError, setAnalyticsError] = useState('');
   const [resettingAnalytics, setResettingAnalytics] = useState(false);
@@ -805,6 +912,15 @@ function Admin() {
       active = false;
       window.clearInterval(interval);
     };
+  }, [user, tab]);
+
+  useEffect(() => {
+    if (!user || tab !== 'users') return undefined;
+    let active = true;
+    api('/api/admin/users')
+      .then((data) => { if (active) setRegisteredUsers(data); })
+      .catch((requestError) => { if (active) setUsersError(requestError.message); });
+    return () => { active = false; };
   }, [user, tab]);
 
   async function signIn(event) {
@@ -854,11 +970,25 @@ function Admin() {
     setAnalyticsError('');
     try {
       await api('/api/admin/analytics', { method: 'DELETE' });
-      setAnalytics({ totalPageViews: 0, totalSectionViews: 0, pageViews: [], sectionViews: [] });
+      setAnalytics({ totalPageViews: 0, totalSectionViews: 0, totalUniqueVisitors: 0, pageViews: [], sectionViews: [], visitors: [] });
     } catch (requestError) {
       setAnalyticsError(requestError.message);
     } finally {
       setResettingAnalytics(false);
+    }
+  }
+
+  async function deleteUser(id) {
+    if (!window.confirm('Permanently delete this user record?')) return;
+    setDeletingUser(id);
+    setUsersError('');
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      setRegisteredUsers((current) => current.filter((registeredUser) => registeredUser._id !== id));
+    } catch (requestError) {
+      setUsersError(requestError.message);
+    } finally {
+      setDeletingUser('');
     }
   }
 
@@ -941,7 +1071,7 @@ function Admin() {
     <main className="admin-shell">
       <header className="admin-header"><a className="wordmark" href="/"><span>EN</span><i>.</i></a><div className="admin-header-title"><span>PORTFOLIO / CONTROL ROOM</span><b>{getKenyanGreeting()}, {user}.</b></div><button className="admin-logout" onClick={signOut}><LogOut size={15} /> Sign out</button></header>
       <div className="admin-layout">
-        <aside className="admin-sidebar"><span className="sidebar-label">WORKSPACE</span><button className={tab === 'content' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('content')}><Layers3 size={17} /> Portfolio <ArrowRight size={14} /></button><button className={tab === 'messages' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('messages')}><MessageSquareText size={17} /> Messages <span className="message-count">{messages.length}</span></button><button className={tab === 'analytics' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('analytics')}><BarChart3 size={17} /> Analytics <ArrowRight size={14} /></button><div className="sidebar-bottom"><ShieldCheck size={17} /><span>Private admin access<br /><b>Session protected</b></span></div></aside>
+        <aside className="admin-sidebar"><span className="sidebar-label">WORKSPACE</span><button className={tab === 'content' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('content')}><Layers3 size={17} /> Portfolio <ArrowRight size={14} /></button><button className={tab === 'messages' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('messages')}><MessageSquareText size={17} /> Messages <span className="message-count">{messages.length}</span></button><button className={tab === 'analytics' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('analytics')}><BarChart3 size={17} /> Analytics <ArrowRight size={14} /></button><button className={tab === 'users' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('users')}><Users size={17} /> Users <span className="message-count">{registeredUsers.length}</span></button><div className="sidebar-bottom"><ShieldCheck size={17} /><span>Private admin access<br /><b>Session protected</b></span></div></aside>
         <section className="admin-main">
           {tab === 'content' ? <>
             <div className="admin-page-title"><div><span className="section-kicker">YOUR PUBLIC SITE</span><h1>Portfolio content</h1><p>Everything here appears on your live portfolio.</p></div><a href="/" target="_blank" rel="noreferrer" className="view-site">View site <ArrowUpRight size={15} /></a></div>
@@ -971,11 +1101,20 @@ function Admin() {
           </> : tab === 'messages' ? <>
             <div className="admin-page-title"><div><span className="section-kicker">CONTACT FORM</span><h1>Your messages</h1><p>Notes sent through your portfolio.</p></div><span className="inbox-total">{messages.length} {messages.length === 1 ? 'MESSAGE' : 'MESSAGES'}</span></div>
             <div className="message-list">{messages.map((message, index) => <article className="inbox-message" key={message._id || `${message.email}-${index}`}><div className="inbox-message-top"><div><span className="inbox-index">{String(index + 1).padStart(2, '0')}</span><h2>{message.name}</h2></div><time>{new Date(message.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</time></div><a className="inbox-email" href={`mailto:${message.email}`}>{message.email} <ArrowUpRight size={13} /></a><p>{message.message}</p></article>)}{!messages.length && <div className="admin-empty"><Mail size={20} /> No messages yet. They&apos;ll show up here.</div>}</div>
+          </> : tab === 'users' ? <>
+            <div className="admin-page-title"><div><span className="section-kicker">GOOGLE SIGN-INS</span><h1>Registered users</h1><p>User records are retained until you delete them.</p></div><span className="inbox-total">{registeredUsers.length} USERS</span></div>
+            {usersError && <p className="analytics-error" role="alert">{usersError}</p>}
+            <div className="analytics-visitors-wrap"><table className="analytics-visitors admin-users-table"><thead><tr><th>Name / email</th><th>IP address</th><th>Approx. location</th><th>Sign-ins</th><th>Last seen</th><th>Action</th></tr></thead><tbody>
+              {registeredUsers.map((registeredUser) => <tr key={registeredUser._id}><td><strong>{registeredUser.name}</strong><br />{registeredUser.email}</td><td>{registeredUser.ipAddress}</td><td>{[registeredUser.city, registeredUser.region, registeredUser.country].filter(Boolean).join(', ') || 'Unknown'}</td><td>{registeredUser.loginCount}</td><td>{new Date(registeredUser.lastSeen).toLocaleString()}</td><td><button className="user-delete-button" onClick={() => deleteUser(registeredUser._id)} disabled={deletingUser === registeredUser._id}>{deletingUser === registeredUser._id ? 'Deleting...' : 'Delete'}</button></td></tr>)}
+              {!registeredUsers.length && <tr><td colSpan="6">No Google users have signed in yet.</td></tr>}
+            </tbody></table></div>
           </> : <>
-            <div className="admin-page-title analytics-page-title"><div><span className="section-kicker">AUDIENCE OVERVIEW</span><h1>Website analytics</h1><p>Anonymous page and section views. Live updates every 5 seconds.</p></div><button className="analytics-reset" onClick={resetAnalytics} disabled={resettingAnalytics}><RotateCcw size={14} />{resettingAnalytics ? 'Resetting...' : 'Reset tracking'}</button></div>
+          </> : <>
+            <div className="admin-page-title analytics-page-title"><div><span className="section-kicker">AUDIENCE OVERVIEW</span><h1>Website analytics</h1><p>Consent-based visitor and section views. Live updates every 5 seconds.</p></div><button className="analytics-reset" onClick={resetAnalytics} disabled={resettingAnalytics}><RotateCcw size={14} />{resettingAnalytics ? 'Resetting...' : 'Reset tracking'}</button></div>
             {analyticsError && <p className="analytics-error" role="alert">{analyticsError}</p>}
             <div className="analytics-metrics">
               <article className="analytics-metric"><span>TOTAL PAGE VIEWS</span><strong>{analytics?.totalPageViews ?? '—'}</strong></article>
+              <article className="analytics-metric"><span>UNIQUE BROWSERS</span><strong>{analytics?.totalUniqueVisitors ?? '—'}</strong></article>
               <article className="analytics-metric"><span>SECTION VIEWS</span><strong>{analytics?.totalSectionViews ?? '—'}</strong></article>
               <article className="analytics-metric"><span>MOST VIEWED SECTION</span><strong>{mostViewedSection?.count ? mostViewedSection.section : '—'}</strong><small>{mostViewedSection?.count || 0} views</small></article>
             </div>
@@ -991,7 +1130,14 @@ function Admin() {
                 const maxSectionViews = Math.max(1, ...(analytics?.sectionViews || []).map((item) => item.count));
                 return <div className="analytics-section-row" key={section}><span>{section}</span><div className="analytics-section-track"><i style={{ width: `${(count / maxSectionViews) * 100}%` }} /></div><strong>{count}</strong></div>;
               })}</div>
-              <p className="analytics-privacy-note">No names, IP addresses, or personal browsing details are stored. Each section is counted once per page visit.</p>
+              <p className="analytics-privacy-note">Only visitors who allow analytics are included. IP addresses and approximate locations are stored for up to 90 days; names are not collected. Each section is counted once per page visit.</p>
+            </section>
+            <section className="analytics-panel">
+              <div className="analytics-panel-heading"><div><span className="section-kicker">CONSENTED VISITORS</span><h2>Recent visitor details</h2></div><span className="inbox-total">LATEST 100</span></div>
+              <div className="analytics-visitors-wrap"><table className="analytics-visitors"><thead><tr><th>IP address</th><th>Approx. location</th><th>Visits</th><th>Last seen</th></tr></thead><tbody>
+                {(analytics?.visitors || []).map((visitor) => <tr key={visitor.visitorId}><td>{visitor.ipAddress}</td><td>{[visitor.city, visitor.region, visitor.country].filter(Boolean).join(', ') || 'Unknown'}</td><td>{visitor.visitCount}</td><td>{new Date(visitor.lastSeen).toLocaleString()}</td></tr>)}
+                {!analytics?.visitors?.length && <tr><td colSpan="4">No visitors have allowed analytics yet.</td></tr>}
+              </tbody></table></div>
             </section>
           </>}
         </section>

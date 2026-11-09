@@ -6,6 +6,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const cookieParser = require('cookie-parser');
 const cloudinary = require('cloudinary').v2;
+const geoip = require('geoip-lite');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const multer = require('multer');
@@ -16,6 +17,11 @@ const tokenSecret = process.env.JWT_SECRET || require('node:crypto').randomBytes
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
 const frontendOrigins = new Set((process.env.FRONTEND_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean));
 const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE || (process.env.NODE_ENV === 'production' ? 'none' : 'strict');
+const googleOAuthConfigured = Boolean(
+  process.env.GOOGLE_CLIENT_ID
+  && process.env.GOOGLE_CLIENT_SECRET
+  && process.env.GOOGLE_REDIRECT_URI,
+);
 const cloudinaryConfigured = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
 if (cloudinaryConfigured) {
   cloudinary.config({
@@ -93,10 +99,35 @@ const Analytics = mongoose.model('Analytics', new mongoose.Schema({
   section: { type: String, default: '' },
   count: { type: Number, default: 0 },
 }, { versionKey: false }).index({ date: 1, type: 1, section: 1 }, { unique: true }));
+const Visitor = mongoose.model('Visitor', new mongoose.Schema({
+  visitorId: { type: String, required: true, unique: true },
+  ipAddress: { type: String, required: true },
+  city: { type: String, default: '' },
+  region: { type: String, default: '' },
+  country: { type: String, default: '' },
+  visitCount: { type: Number, default: 0 },
+  firstSeen: { type: Date, default: Date.now },
+  lastSeen: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 90 },
+}, { versionKey: false }));
+const User = mongoose.model('User', new mongoose.Schema({
+  googleId: { type: String, required: true, unique: true },
+  name: { type: String, required: true },
+  email: { type: String, required: true },
+  ipAddress: { type: String, required: true },
+  city: { type: String, default: '' },
+  region: { type: String, default: '' },
+  country: { type: String, default: '' },
+  loginCount: { type: Number, default: 1 },
+  createdAt: { type: Date, default: Date.now },
+  lastSeen: { type: Date, default: Date.now },
+}, { versionKey: false }));
 const trackedSections = new Set(['home', 'work', 'game', 'about', 'stack', 'contact']);
 const memoryAnalytics = new Map();
+const memoryVisitors = new Map();
+const memoryUsers = new Map();
 
 app.disable('x-powered-by');
+app.set('trust proxy', process.env.NODE_ENV === 'production' ? 1 : false);
 app.use((req, res, next) => {
   const origin = req.get('Origin');
   const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0];
@@ -151,6 +182,34 @@ function requireAdmin(req, res, next) {
   }
 }
 
+function requireVisitor(req, res, next) {
+  try {
+    const token = req.cookies.ezra_visitor;
+    if (!token) return res.status(401).json({ error: 'Sign in with Google to view this portfolio.' });
+    const visitor = jwt.verify(token, tokenSecret);
+    if (!mongoose.isValidObjectId(visitor.userId)) {
+      return res.status(401).json({ error: 'Your Google session has expired. Please sign in again.' });
+    }
+    if (mongoose.connection.readyState === 1) {
+      return User.findById(visitor.userId).select('_id').lean()
+        .then((user) => user
+          ? (req.visitor = visitor, next())
+          : res.status(401).json({ error: 'Your account is no longer available. Please sign in again.' }))
+        .catch(next);
+    }
+    if (process.env.MONGODB_URI) {
+      return res.status(503).json({ error: 'User storage is unavailable. Please try again later.' });
+    }
+    if (!memoryUsers.has(visitor.userId)) {
+      return res.status(401).json({ error: 'Your account is no longer available. Please sign in again.' });
+    }
+    req.visitor = visitor;
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Your Google session has expired. Please sign in again.' });
+  }
+}
+
 function requireDatabase(req, res, next) {
   if (process.env.MONGODB_URI && mongoose.connection.readyState !== 1) {
     return res.status(503).json({ error: 'MongoDB is unavailable. Changes were not saved; check Atlas network access and try again.' });
@@ -165,16 +224,25 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: storage !== 'unavailable', storage });
 });
 
-app.get('/api/portfolio', requireDatabase, async (_req, res, next) => {
+app.get('/api/auth/config', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    googleConfigured: googleOAuthConfigured
+      && Boolean(process.env.MONGODB_URI)
+      && mongoose.connection.readyState === 1,
+  });
+});
+
+app.get('/api/portfolio', requireVisitor, requireDatabase, async (_req, res, next) => {
   try {
-    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=120');
+    res.set('Cache-Control', 'private, no-store');
     res.json(await getPortfolio());
   } catch (error) {
     next(error);
   }
 });
 
-app.post('/api/contact', requireDatabase, async (req, res, next) => {
+app.post('/api/contact', requireVisitor, requireDatabase, async (req, res, next) => {
   try {
     const name = String(req.body.name || '').trim();
     const email = String(req.body.email || '').trim();
@@ -191,27 +259,62 @@ app.post('/api/contact', requireDatabase, async (req, res, next) => {
   }
 });
 
-app.post('/api/analytics/view', async (req, res, next) => {
-  const { type, section } = req.body || {};
+app.post('/api/analytics/view', requireVisitor, async (req, res, next) => {
+  const { type, section, visitorId } = req.body || {};
   if ((type !== 'page' && type !== 'section')
     || (type === 'section' && !trackedSections.has(section))
-    || (type === 'page' && section !== undefined)) {
+    || (type === 'page' && section !== undefined)
+    || typeof visitorId !== 'string'
+    || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(visitorId)) {
     return res.status(400).json({ error: 'Analytics event is invalid.' });
   }
   try {
     const date = new Date().toISOString().slice(0, 10);
     const eventSection = type === 'section' ? section : '';
+    const ipAddress = req.ip?.replace(/^::ffff:/, '');
+    if (!ipAddress) return res.status(400).json({ error: 'Visitor IP address is unavailable.' });
+    const location = geoip.lookup(ipAddress);
     if (mongoose.connection.readyState === 1) {
-      await Analytics.findOneAndUpdate(
+      await Promise.all([
+        Analytics.findOneAndUpdate(
         { date, type, section: eventSection },
         { $inc: { count: 1 } },
         { upsert: true, new: true, setDefaultsOnInsert: true },
-      );
+        ),
+        ...(type === 'page' ? [Visitor.findOneAndUpdate(
+          { visitorId },
+          {
+            $set: {
+              ipAddress,
+              city: location?.city || '',
+              region: location?.region || '',
+              country: location?.country || '',
+              lastSeen: new Date(),
+            },
+            $setOnInsert: { firstSeen: new Date() },
+            $inc: { visitCount: 1 },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true },
+        )] : []),
+      ]);
     } else if (process.env.MONGODB_URI) {
       return res.status(503).json({ error: 'Analytics storage is unavailable.' });
     } else {
       const key = `${date}:${type}:${eventSection}`;
       memoryAnalytics.set(key, (memoryAnalytics.get(key) || 0) + 1);
+      if (type === 'page') {
+        const visitor = memoryVisitors.get(visitorId);
+        memoryVisitors.set(visitorId, {
+          visitorId,
+          ipAddress,
+          city: location?.city || '',
+          region: location?.region || '',
+          country: location?.country || '',
+          visitCount: (visitor?.visitCount || 0) + 1,
+          firstSeen: visitor?.firstSeen || new Date(),
+          lastSeen: new Date(),
+        });
+      }
     }
     return res.sendStatus(204);
   } catch (error) {
@@ -248,6 +351,128 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/admin/session', requireAdmin, (req, res) => res.json({ username: req.admin.username }));
 
+app.get('/api/auth/google', (req, res) => {
+  if (!googleOAuthConfigured) {
+    return res.status(503).json({ error: 'Google sign-in is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.' });
+  }
+  if (!process.env.MONGODB_URI || mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Google sign-in requires an available MongoDB database to save user accounts.' });
+  }
+  const state = require('node:crypto').randomBytes(32).toString('hex');
+  res.cookie('ezra_google_state', state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' || req.get('x-forwarded-proto')?.split(',')[0] === 'https',
+    sameSite: 'lax',
+    maxAge: 10 * 60 * 1000,
+  });
+  const authorizationUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  authorizationUrl.search = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: process.env.GOOGLE_REDIRECT_URI,
+    response_type: 'code',
+    scope: 'openid email profile',
+    state,
+  }).toString();
+  return res.redirect(authorizationUrl.toString());
+});
+
+app.get('/api/auth/google/callback', requireDatabase, async (req, res, next) => {
+  const frontendUrl = (process.env.FRONTEND_URL || [...frontendOrigins][0] || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+  const redirectWithError = (reason) => res.redirect(`${frontendUrl}/?auth_error=${encodeURIComponent(reason)}`);
+  const secureCookie = process.env.NODE_ENV === 'production'
+    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
+  const expectedState = req.cookies.ezra_google_state;
+  res.clearCookie('ezra_google_state', { httpOnly: true, secure: secureCookie, sameSite: 'lax' });
+
+  if (!googleOAuthConfigured || !process.env.MONGODB_URI || mongoose.connection.readyState !== 1) return redirectWithError('not_configured');
+  if (req.query.error) return redirectWithError('cancelled');
+  if (typeof req.query.code !== 'string' || typeof req.query.state !== 'string'
+    || !expectedState || req.query.state !== expectedState) {
+    return redirectWithError('invalid_state');
+  }
+
+  try {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code: req.query.code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI,
+        grant_type: 'authorization_code',
+      }),
+    });
+    const tokens = await tokenResponse.json();
+    if (!tokenResponse.ok || typeof tokens.access_token !== 'string') {
+      return redirectWithError('google_failed');
+    }
+
+    const profileResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const googleProfile = await profileResponse.json();
+    if (!profileResponse.ok || typeof googleProfile.sub !== 'string'
+      || typeof googleProfile.name !== 'string' || typeof googleProfile.email !== 'string'
+      || googleProfile.email_verified !== true) {
+      return redirectWithError('profile_unavailable');
+    }
+
+    const ipAddress = req.ip?.replace(/^::ffff:/, '');
+    if (!ipAddress) return redirectWithError('ip_unavailable');
+    const location = geoip.lookup(ipAddress);
+    const now = new Date();
+    const user = await User.findOneAndUpdate(
+      { googleId: googleProfile.sub },
+      {
+        $set: {
+          name: googleProfile.name,
+          email: googleProfile.email,
+          ipAddress,
+          city: location?.city || '',
+          region: location?.region || '',
+          country: location?.country || '',
+          lastSeen: now,
+        },
+        $setOnInsert: { createdAt: now },
+        $inc: { loginCount: 1 },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
+    );
+
+    const visitorToken = jwt.sign({ userId: user._id.toString() }, tokenSecret, { expiresIn: '30d' });
+    res.cookie('ezra_visitor', visitorToken, {
+      httpOnly: true,
+      secure: secureCookie,
+      sameSite: adminCookieSameSite,
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+    return res.redirect(frontendUrl);
+  } catch (error) {
+    console.error('Google sign-in failed:', error);
+    return next(error);
+  }
+});
+
+app.get('/api/auth/session', requireDatabase, requireVisitor, async (req, res, next) => {
+  try {
+    const user = mongoose.connection.readyState === 1
+      ? await User.findById(req.visitor.userId).select('name email').lean()
+      : memoryUsers.get(req.visitor.userId);
+    if (!user) return res.status(401).json({ error: 'Your account is no longer available. Please sign in again.' });
+    return res.json({ user: { name: user.name, email: user.email } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const secureCookie = process.env.NODE_ENV === 'production'
+    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
+  res.clearCookie('ezra_visitor', { httpOnly: true, secure: secureCookie, sameSite: adminCookieSameSite });
+  return res.sendStatus(204);
+});
+
 app.post('/api/admin/cv', requireAdmin, cvUpload.single('cv'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Choose a PDF CV to upload.' });
@@ -280,7 +505,7 @@ app.post('/api/admin/cv', requireAdmin, cvUpload.single('cv'), async (req, res, 
   }
 });
 
-app.get('/api/cv', requireDatabase, async (_req, res, next) => {
+app.get('/api/cv', requireVisitor, requireDatabase, async (_req, res, next) => {
   try {
     const portfolio = await getPortfolio();
     const cvUrl = portfolio.profile?.cvUrl;
@@ -391,12 +616,18 @@ app.get('/api/admin/analytics', requireAdmin, requireDatabase, async (_req, res,
       date.setUTCDate(date.getUTCDate() - (6 - index));
       return date.toISOString().slice(0, 10);
     });
-    const records = mongoose.connection.readyState === 1
-      ? await Analytics.find().lean()
-      : [...memoryAnalytics].map(([key, count]) => {
-        const [date, type, section] = key.split(':');
-        return { date, type, section, count };
-      });
+    const [records, visitors] = mongoose.connection.readyState === 1
+      ? await Promise.all([
+        Analytics.find().lean(),
+        Visitor.find().sort({ lastSeen: -1 }).limit(100).lean(),
+      ])
+      : [
+        [...memoryAnalytics].map(([key, count]) => {
+          const [date, type, section] = key.split(':');
+          return { date, type, section, count };
+        }),
+        [...memoryVisitors.values()].sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 100),
+      ];
     const pageViews = dates.map((date) => ({
       date,
       count: records.filter((record) => record.type === 'page' && record.date === date)
@@ -412,8 +643,12 @@ app.get('/api/admin/analytics', requireAdmin, requireDatabase, async (_req, res,
         .reduce((total, record) => total + record.count, 0),
       totalSectionViews: records.filter((record) => record.type === 'section')
         .reduce((total, record) => total + record.count, 0),
+      totalUniqueVisitors: mongoose.connection.readyState === 1
+        ? await Visitor.countDocuments()
+        : memoryVisitors.size,
       pageViews,
       sectionViews,
+      visitors,
     });
   } catch (error) {
     return next(error);
@@ -422,8 +657,39 @@ app.get('/api/admin/analytics', requireAdmin, requireDatabase, async (_req, res,
 
 app.delete('/api/admin/analytics', requireAdmin, requireDatabase, async (_req, res, next) => {
   try {
-    if (mongoose.connection.readyState === 1) await Analytics.deleteMany({});
-    else memoryAnalytics.clear();
+    if (mongoose.connection.readyState === 1) {
+      await Promise.all([Analytics.deleteMany({}), Visitor.deleteMany({})]);
+    } else {
+      memoryAnalytics.clear();
+      memoryVisitors.clear();
+    }
+    return res.sendStatus(204);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/admin/users', requireAdmin, requireDatabase, async (_req, res, next) => {
+  try {
+    const users = mongoose.connection.readyState === 1
+      ? await User.find().select('name email ipAddress city region country loginCount createdAt lastSeen')
+        .sort({ lastSeen: -1 }).limit(200).lean()
+      : [...memoryUsers.values()].sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 200);
+    return res.json(users);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, requireDatabase, async (req, res, next) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'User not found.' });
+  try {
+    if (mongoose.connection.readyState === 1) {
+      const deleted = await User.findByIdAndDelete(req.params.id);
+      if (!deleted) return res.status(404).json({ error: 'User not found.' });
+    } else if (!memoryUsers.delete(req.params.id)) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
     return res.sendStatus(204);
   } catch (error) {
     return next(error);
