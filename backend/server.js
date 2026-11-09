@@ -165,7 +165,7 @@ app.use((req, res, next) => {
     res.set('Access-Control-Allow-Credentials', 'true');
   }
   if (req.method === 'OPTIONS') {
-    res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.set('Access-Control-Allow-Headers', 'Content-Type');
     return res.sendStatus(204);
   }
