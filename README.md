@@ -24,40 +24,41 @@ The production client reads its API base URL from `client/.env.production` (`VIT
 
 On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. Production defaults admin cookies to `SameSite=None` and marks them `Secure` for separately hosted frontend and API services. Set `ADMIN_COOKIE_SAME_SITE` only if you need to override that behavior.
 
-Use [`backend/.env.example`](./backend/.env.example) as the complete backend environment-variable template. Copy it to `backend/.env` for local development and set the same required values in the production backend host's environment settings; local `.env` values are not deployed. Keep real credentials out of source control. `PORT` is usually assigned by the hosting provider.
+Use [`backend/.env.example`](./backend/.env.example) for local development. For Render, use [`backend/.env.render.example`](./backend/.env.render.example) as the complete production variable list: replace every placeholder and add the values in the backend service's **Environment** settings. Render does not load the file automatically. Keep real credentials out of source control and do not set `PORT`; the host assigns it.
 
-Visitors register with a username, email address, and password; a phone number can optionally be saved to the account. Registration verification, email-code sign-in, and password recovery send a generated six-digit code through Nodemailer. Codes expire after 10 minutes, are stored as purpose-bound hashes, and can be used once. Passwords and codes are not stored in plaintext.
+Visitors register with a username, email address, and password; a phone number can optionally be saved to the account. Registration verification, email-code sign-in, and password recovery send a generated six-digit code through the configured email provider. Codes expire after 10 minutes, are stored as purpose-bound hashes, and can be used once. Passwords and codes are not stored in plaintext.
 
-Configure email delivery in the backend environment. `EMAIL_USER` and `EMAIL_PASS` are required for verification and password-recovery email; the remaining settings are optional:
+For production, use Resend's HTTPS API rather than SMTP, which some backend hosts block. Verify a sending domain in Resend, create an API key, then set these variables in the backend host's environment:
 
 | Variable | Value |
 |---|---|
-| `EMAIL_USER` | SMTP account username; for Gmail, the Gmail address |
-| `EMAIL_PASS` | SMTP password or provider app password |
-| `EMAIL_FROM` | Optional sender address; defaults to `EMAIL_USER` |
-| `EMAIL_HOST` | Optional SMTP host; defaults to Gmail when omitted |
-| `EMAIL_PORT` | Optional SMTP port; defaults to `587` for a custom host |
-| `EMAIL_SECURE` | Set to `true` to use TLS immediately; port `465` enables it by default |
+| `EMAIL_PROVIDER` | Set to `resend` |
+| `RESEND_API_KEY` | Resend API key; keep it private |
+| `EMAIL_FROM` | Sender using the verified domain, such as `Ezra Nzioki <no-reply@example.com>` |
 
-For Gmail, add these required values to `backend/.env` or the backend host's environment:
+For local development, add these to `backend/.env`:
 
 ```env
-EMAIL_USER=your-email@gmail.com
-EMAIL_PASS=your-gmail-app-password
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_your_api_key
+EMAIL_FROM=Ezra Nzioki <no-reply@example.com>
 ```
 
-Gmail is used by default when `EMAIL_HOST` is omitted. For a different SMTP provider, also set its host and connection settings:
+The sender domain in `EMAIL_FROM` must be verified with Resend. For local testing, Resend's test sender can only deliver to the account owner's email; verify your own domain to send to other recipients. To keep using SMTP instead, set `EMAIL_PROVIDER=smtp`, `EMAIL_USER`, and `EMAIL_PASS`. For a custom SMTP provider, also set its connection details:
 
 ```env
+EMAIL_PROVIDER=smtp
+EMAIL_USER=your-smtp-username
+EMAIL_PASS=your-smtp-password
 EMAIL_HOST=smtp.example.com
 EMAIL_PORT=587
 EMAIL_SECURE=false
 EMAIL_FROM=your-verified-sender@example.com
 ```
 
-Use the SMTP credentials and sender address required by your provider. For Gmail, use an app password rather than your regular account password. Keep all email credentials on the backend only; never put them in the client environment. With `MONGODB_URI` configured, accounts are stored in `emailaccounts`; without MongoDB, account data is temporary and is lost when the backend restarts. Usernames, email addresses, optional phone numbers, IP addresses, and approximate locations are retained until an admin deletes the account.
+Keep all email credentials on the backend only; never put them in the client environment. With `MONGODB_URI` configured, accounts are stored in `emailaccounts`; without MongoDB, account data is temporary and is lost when the backend restarts. Usernames, email addresses, optional phone numbers, IP addresses, and approximate locations are retained until an admin deletes the account.
 
-If delivery fails in production, confirm `EMAIL_USER` and `EMAIL_PASS` are set in the backend host's environment (the ignored local `backend/.env` is not deployed), then redeploy the latest backend source. Gmail requires a current App Password. Some hosts restrict direct email connections; if the backend logs show a connection timeout or refusal, use an email provider API transport with Nodemailer instead of Gmail's SMTP connection.
+If delivery fails in production, check the backend host's environment settings (the ignored local `backend/.env` is not deployed), confirm that `EMAIL_FROM` is on a verified Resend domain, then redeploy the latest backend source.
 
 ## MongoDB persistence
 

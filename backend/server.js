@@ -280,6 +280,20 @@ function setVisitorSession(req, res, userId, provider = 'email') {
 
 let emailTransporter;
 
+function getEmailProvider() {
+  return process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'smtp';
+}
+
+function isEmailDeliveryConfigured() {
+  if (getEmailProvider() === 'resend') {
+    return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+  }
+  if (getEmailProvider() === 'smtp') {
+    return Boolean(process.env.EMAIL_USER?.trim() && process.env.EMAIL_PASS?.trim());
+  }
+  return false;
+}
+
 function getEmailTransporter() {
   const user = process.env.EMAIL_USER?.trim();
   const pass = process.env.EMAIL_PASS?.trim();
@@ -297,6 +311,63 @@ function getEmailTransporter() {
   return emailTransporter;
 }
 
+async function deliverEmail(message) {
+  const provider = getEmailProvider();
+  if (!isEmailDeliveryConfigured()) {
+    const error = new Error('Email delivery is not configured.');
+    error.responseCode = 503;
+    error.provider = provider;
+    throw error;
+  }
+
+  if (provider === 'resend') {
+    let response;
+    try {
+      response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: process.env.EMAIL_FROM.trim(),
+          to: [message.to],
+          subject: message.subject,
+          text: message.text,
+          html: message.html,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (cause) {
+      const error = new Error('Could not connect to the Resend API.', { cause });
+      error.provider = provider;
+      error.code = cause.code || cause.cause?.code;
+      throw error;
+    }
+
+    if (!response.ok) {
+      const error = new Error(`Resend rejected the email request with status ${response.status}.`);
+      error.provider = provider;
+      error.responseCode = response.status;
+      error.code = `RESEND_HTTP_${response.status}`;
+      throw error;
+    }
+    return;
+  }
+
+  const transporter = getEmailTransporter();
+  if (!transporter) {
+    const error = new Error('SMTP email delivery is not configured.');
+    error.responseCode = 503;
+    error.provider = provider;
+    throw error;
+  }
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM?.trim() || process.env.EMAIL_USER.trim(),
+    ...message,
+  });
+}
+
 function hashEmailCode(userId, email, purpose, code) {
   return crypto.createHmac('sha256', emailCodeSecret)
     .update(`${userId}:email:${email}:${purpose}:${code}`)
@@ -304,12 +375,6 @@ function hashEmailCode(userId, email, purpose, code) {
 }
 
 async function sendEmailCode(user, purpose) {
-  const transporter = getEmailTransporter();
-  if (!transporter) {
-    const error = new Error('Email verification is not configured.');
-    error.responseCode = 503;
-    throw error;
-  }
   const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const codeHash = hashEmailCode(user._id, user.email, purpose, code);
@@ -323,8 +388,7 @@ async function sendEmailCode(user, purpose) {
     user.emailCodePurpose = purpose;
   }
   try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM?.trim() || process.env.EMAIL_USER.trim(),
+    await deliverEmail({
       to: user.email,
       subject: purpose === 'password-reset' ? 'Your password reset code' : 'Your email verification code',
       text: `Your verification code is ${code}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
@@ -345,19 +409,38 @@ async function sendEmailCode(user, purpose) {
 }
 
 function getEmailDeliveryErrorMessage(error) {
+  const provider = error?.provider || getEmailProvider();
   if (error?.responseCode === 503) {
-    return 'Email verification is not configured. Set EMAIL_USER and EMAIL_PASS in the backend environment.';
+    if (provider === 'resend') {
+      return 'Resend email delivery is not configured. Set EMAIL_PROVIDER=resend, RESEND_API_KEY, and EMAIL_FROM in the backend environment.';
+    }
+    if (provider === 'smtp') {
+      return 'SMTP email delivery is not configured. Set EMAIL_USER and EMAIL_PASS in the backend environment.';
+    }
+    return 'The EMAIL_PROVIDER setting is unsupported. Set it to resend or smtp.';
+  }
+  if (provider === 'resend') {
+    if ([401, 403].includes(Number(error?.responseCode))) {
+      return 'Resend rejected the API key or sender. Check RESEND_API_KEY and make sure EMAIL_FROM uses a sender on a verified Resend domain.';
+    }
+    if (Number(error?.responseCode) === 429) {
+      return 'Resend rate-limited the email request. Check your Resend account limits and try again later.';
+    }
+    if (error?.responseCode) {
+      return 'Resend rejected the email request. Check the sender address, recipient restrictions, and Resend account status.';
+    }
+    return 'The backend could not connect to the Resend API over HTTPS. Check the backend host’s outbound HTTPS access and review its logs for the connection error.';
   }
   if (error?.code === 'EAUTH' || [534, 535].includes(Number(error?.responseCode))) {
-    return 'Gmail rejected the email login. Set EMAIL_USER to your Gmail address and EMAIL_PASS to a current Gmail app password in the backend environment.';
+    return 'The SMTP provider rejected the login. Check EMAIL_USER and EMAIL_PASS in the backend environment.';
   }
   if (['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'EDNS', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'EHOSTUNREACH'].includes(error?.code)) {
-    return 'The backend could not connect to Gmail. Check the backend host’s outbound email restrictions; if it blocks Gmail connections, use an email provider API transport with Nodemailer.';
+    return 'The backend could not connect to the SMTP host. Check EMAIL_HOST, EMAIL_PORT, and the backend host’s outbound email restrictions; if SMTP is blocked, use EMAIL_PROVIDER=resend with the Resend HTTPS API.';
   }
   if ([550, 553].includes(Number(error?.responseCode))) {
-    return 'Gmail rejected the sender address. Set EMAIL_FROM to the authenticated Gmail address or a sender verified by your email provider.';
+    return 'The SMTP provider rejected the sender address. Set EMAIL_FROM to the authenticated or provider-verified sender address.';
   }
-  return 'Nodemailer could not deliver the email. Check EMAIL_USER and EMAIL_PASS in the production backend environment and review the backend logs for the delivery error code.';
+  return 'The email provider could not deliver the message. Check the provider settings in the production backend environment and review backend logs for the error code.';
 }
 
 function requireDatabase(req, res, next) {
@@ -518,7 +601,7 @@ authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireD
   if (password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
     return res.status(400).json({ error: 'Use a password of at least 6 characters and no more than 72 bytes.' });
   }
-  if (!getEmailTransporter()) {
+  if (!isEmailDeliveryConfigured()) {
     return res.status(503).json({ error: getEmailDeliveryErrorMessage({ responseCode: 503 }) });
   }
 
@@ -562,7 +645,11 @@ authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireD
     try {
       await sendEmailCode(account, 'registration');
     } catch (error) {
-      console.error('Email registration code delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
+      console.error('Email registration code delivery failed:', {
+        provider: error.provider || getEmailProvider(),
+        code: error.code || error.cause?.code || 'UNKNOWN',
+        responseCode: error.responseCode,
+      });
       if (mongoose.connection.readyState === 1) await EmailAccount.findByIdAndDelete(account._id);
       else memoryUsers.delete(account._id.toString());
       return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
@@ -579,7 +666,7 @@ app.post('/api/auth/email/send-code', limitAuthAttempts, requireDatabase, async 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
     return res.status(400).json({ error: 'Enter a valid email address.' });
   }
-  if (!getEmailTransporter()) {
+  if (!isEmailDeliveryConfigured()) {
     return res.status(503).json({ error: getEmailDeliveryErrorMessage({ responseCode: 503 }) });
   }
   try {
@@ -589,7 +676,11 @@ app.post('/api/auth/email/send-code', limitAuthAttempts, requireDatabase, async 
     if (account) await sendEmailCode(account, account.emailVerified === false ? 'registration' : 'login');
     return res.json({ message: 'If an account exists for that email, a sign-in code has been sent.' });
   } catch (error) {
-    console.error('Email sign-in code delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
+    console.error('Email sign-in code delivery failed:', {
+      provider: error.provider || getEmailProvider(),
+      code: error.code || error.cause?.code || 'UNKNOWN',
+      responseCode: error.responseCode,
+    });
     return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
   }
 });
@@ -670,7 +761,7 @@ app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
     return res.status(400).json({ error: 'Enter a valid email address.' });
   }
-  if (!getEmailTransporter()) {
+  if (!isEmailDeliveryConfigured()) {
     return res.status(503).json({ error: getEmailDeliveryErrorMessage({ responseCode: 503 }) });
   }
 
@@ -683,7 +774,11 @@ app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async 
     }
     return res.json({ message: 'If a verified account exists for that email, a password reset code has been sent.' });
   } catch (error) {
-    console.error('Email password recovery delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
+    console.error('Email password recovery delivery failed:', {
+      provider: error.provider || getEmailProvider(),
+      code: error.code || error.cause?.code || 'UNKNOWN',
+      responseCode: error.responseCode,
+    });
     return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
   }
 });
