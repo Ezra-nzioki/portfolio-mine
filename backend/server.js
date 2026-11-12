@@ -18,6 +18,7 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const cloudinary = cloudinaryPackage.v2;
 const app = express();
 const authRouter = express.Router();
+const emailAddressPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const port = process.env.PORT || 4000;
 const tokenSecret = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 const dummyPasswordHash = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 12);
@@ -347,7 +348,16 @@ function getEmailDeliveryErrorMessage(error) {
   if (error?.responseCode === 503) {
     return 'Email verification is not configured. Set EMAIL_USER and EMAIL_PASS in the backend environment.';
   }
-  return 'The backend could not send an email code. Check the SMTP credentials and email service settings.';
+  if (error?.code === 'EAUTH' || [534, 535].includes(Number(error?.responseCode))) {
+    return 'Gmail rejected the email login. Set EMAIL_USER to your Gmail address and EMAIL_PASS to a current Gmail app password in the backend environment.';
+  }
+  if (['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'EDNS', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'EHOSTUNREACH'].includes(error?.code)) {
+    return 'The backend could not connect to Gmail. Check the backend host’s outbound email restrictions; if it blocks Gmail connections, use an email provider API transport with Nodemailer.';
+  }
+  if ([550, 553].includes(Number(error?.responseCode))) {
+    return 'Gmail rejected the sender address. Set EMAIL_FROM to the authenticated Gmail address or a sender verified by your email provider.';
+  }
+  return 'Nodemailer could not deliver the email. Check EMAIL_USER and EMAIL_PASS in the production backend environment and review the backend logs for the delivery error code.';
 }
 
 function requireDatabase(req, res, next) {
@@ -378,7 +388,11 @@ app.post('/api/contact', requireVisitor, requireDatabase, async (req, res, next)
     const name = String(req.body.name || '').trim();
     const email = String(req.body.email || '').trim();
     const message = String(req.body.message || '').trim();
-    if (!name || !email || !message || name.length > 100 || email.length > 200 || message.length > 4000) {
+    if (!name || !email || !message
+      || name.length > 100
+      || email.length > 200
+      || !emailAddressPattern.test(email)
+      || message.length > 4000) {
       return res.status(400).json({ error: 'Please provide a name, valid email, and a message under 4,000 characters.' });
     }
     const entry = { name, email, message, createdAt: new Date() };

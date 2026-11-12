@@ -24,9 +24,11 @@ The production client reads its API base URL from `client/.env.production` (`VIT
 
 On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. Production defaults admin cookies to `SameSite=None` and marks them `Secure` for separately hosted frontend and API services. Set `ADMIN_COOKIE_SAME_SITE` only if you need to override that behavior.
 
+Use [`backend/.env.example`](./backend/.env.example) as the complete backend environment-variable template. Copy it to `backend/.env` for local development and set the same required values in the production backend host's environment settings; local `.env` values are not deployed. Keep real credentials out of source control. `PORT` is usually assigned by the hosting provider.
+
 Visitors register with a username, email address, and password; a phone number can optionally be saved to the account. Registration verification, email-code sign-in, and password recovery send a generated six-digit code through Nodemailer. Codes expire after 10 minutes, are stored as purpose-bound hashes, and can be used once. Passwords and codes are not stored in plaintext.
 
-Configure email delivery in the backend environment:
+Configure email delivery in the backend environment. `EMAIL_USER` and `EMAIL_PASS` are required for verification and password-recovery email; the remaining settings are optional:
 
 | Variable | Value |
 |---|---|
@@ -54,6 +56,8 @@ EMAIL_FROM=your-verified-sender@example.com
 ```
 
 Use the SMTP credentials and sender address required by your provider. For Gmail, use an app password rather than your regular account password. Keep all email credentials on the backend only; never put them in the client environment. With `MONGODB_URI` configured, accounts are stored in `emailaccounts`; without MongoDB, account data is temporary and is lost when the backend restarts. Usernames, email addresses, optional phone numbers, IP addresses, and approximate locations are retained until an admin deletes the account.
+
+If delivery fails in production, confirm `EMAIL_USER` and `EMAIL_PASS` are set in the backend host's environment (the ignored local `backend/.env` is not deployed), then redeploy the latest backend source. Gmail requires a current App Password. Some hosts restrict direct email connections; if the backend logs show a connection timeout or refusal, use an email provider API transport with Nodemailer instead of Gmail's SMTP connection.
 
 ## MongoDB persistence
 
