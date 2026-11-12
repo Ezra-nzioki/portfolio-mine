@@ -587,6 +587,21 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/admin/session', requireAdmin, (req, res) => res.json({ username: req.admin.username }));
 
+app.get('/api/admin/bootstrap', requireAdmin, requireDatabase, async (req, res, next) => {
+  try {
+    const [portfolio, messages] = await Promise.all([
+      getPortfolio(),
+      mongoose.connection.readyState === 1
+        ? Message.find().sort({ createdAt: -1 }).limit(100).lean()
+        : memoryMessages,
+    ]);
+    res.set('Cache-Control', 'private, no-store');
+    return res.json({ username: req.admin.username, portfolio, messages });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireDatabase, async (req, res, next) => {
   const requestedName = typeof req.body.username === 'string' ? req.body.username.trim() : '';
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';

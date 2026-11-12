@@ -1035,12 +1035,12 @@ function Admin() {
   const [uploadingCv, setUploadingCv] = useState(false);
 
   useEffect(() => {
-    api('/api/admin/session')
-      .then((session) => {
-        setUser(session.username);
-        return Promise.all([api('/api/portfolio'), api('/api/admin/messages')]);
+    api('/api/admin/bootstrap')
+      .then((data) => {
+        setUser(data.username);
+        setPortfolio(data.portfolio);
+        setMessages(data.messages);
       })
-      .then(([data, inbox]) => { setPortfolio(data); setMessages(inbox); })
       .catch((requestError) => { if (requestError.message !== 'Authentication required.') setError(requestError.message); });
   }, []);
 
@@ -1082,9 +1082,9 @@ function Admin() {
     try {
       const session = await api('/api/admin/login', { method: 'POST', body: JSON.stringify(login) });
       setUser(session.username);
-      const [data, inbox] = await Promise.all([api('/api/portfolio'), api('/api/admin/messages')]);
-      setPortfolio(data);
-      setMessages(inbox);
+      const data = await api('/api/admin/bootstrap');
+      setPortfolio(data.portfolio);
+      setMessages(data.messages);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
