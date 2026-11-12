@@ -42,6 +42,7 @@ const CONTACT_EMAIL = 'ezranzioki@gmail.com';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 const ANALYTICS_CONSENT_KEY = 'ezra_analytics_consent';
 const ANALYTICS_VISITOR_KEY = 'ezra_analytics_visitor';
+const DEFAULT_SKILLS = ['React', 'Node.js', 'Express', 'MongoDB', 'Tailwind CSS', 'REST APIs', 'Render'];
 const FEATURED_PROJECTS = [
   {
     name: 'Barber Shop Appointment Platform',
@@ -70,6 +71,7 @@ const emptyPortfolio = {
     github: '',
     linkedin: '',
     availability: 'Open to select projects',
+    skills: [...DEFAULT_SKILLS],
   },
   projects: [],
 };
@@ -551,7 +553,7 @@ function PortfolioPage({ portfolio, loading, loadError, user, onAdminSignIn, onS
 
       <section className="stack-section section-wrap" id="stack">
         <div className="section-heading"><div><span className="section-kicker">TOOLS I BUILD WITH</span><h2>Full stack. <span className="accent-text">One mindset.</span></h2></div><p>From first interface to production<br />deployment, end to end.</p></div>
-        <div className="stack-grid">{['React', 'Node.js', 'Express', 'MongoDB', 'Tailwind CSS', 'REST APIs', 'Render'].map((technology, index) => <div className="stack-item" key={technology}><span>0{index + 1}</span><Code2 size={17} /><b>{technology}</b><ArrowUpRight size={15} /></div>)}</div>
+        <div className="stack-grid">{(Array.isArray(profile.skills) ? profile.skills : DEFAULT_SKILLS).map((technology, index) => <div className="stack-item" key={`${technology}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><Code2 size={17} /><b>{technology}</b><ArrowUpRight size={15} /></div>)}</div>
       </section>
 
       <section className="contact-section section-wrap" id="contact">
@@ -1148,6 +1150,29 @@ function Admin() {
   if (!user) return <main className="admin-login-shell"><a className="wordmark login-wordmark" href="/"><span>EN</span><i>.</i></a><div className="login-panel"><span className="section-kicker">PORTFOLIO ADMIN</span><h1>Welcome<br />back, Ezra.</h1><p>Sign in to update your portfolio and view messages.</p><form onSubmit={signIn}><label>Username<input value={login.username} onChange={(event) => setLogin({ ...login, username: event.target.value })} autoComplete="username" required /></label><label>Password<input type="password" value={login.password} onChange={(event) => setLogin({ ...login, password: event.target.value })} autoComplete="current-password" required /></label><button className="admin-primary" disabled={busy}>{busy ? 'Signing in...' : 'Sign in'} <ArrowRight size={16} /></button><span className="error-text" role="alert">{error}</span></form></div><a href="/" className="back-home"><ArrowDownRight size={14} /> Back to portfolio</a></main>;
 
   const updateProfile = (key, value) => setPortfolio((current) => ({ ...current, profile: { ...current.profile, [key]: value } }));
+  const updateSkill = (index, value) => setPortfolio((current) => ({
+    ...current,
+    profile: {
+      ...current.profile,
+      skills: (Array.isArray(current.profile.skills) ? current.profile.skills : DEFAULT_SKILLS)
+        .map((skill, skillIndex) => skillIndex === index ? value : skill),
+    },
+  }));
+  const addSkill = () => setPortfolio((current) => ({
+    ...current,
+    profile: {
+      ...current.profile,
+      skills: [...(Array.isArray(current.profile.skills) ? current.profile.skills : DEFAULT_SKILLS), ''],
+    },
+  }));
+  const deleteSkill = (index) => setPortfolio((current) => ({
+    ...current,
+    profile: {
+      ...current.profile,
+      skills: (Array.isArray(current.profile.skills) ? current.profile.skills : DEFAULT_SKILLS)
+        .filter((_, skillIndex) => skillIndex !== index),
+    },
+  }));
   const updateProject = (id, key, value) => setPortfolio((current) => ({ ...current, projects: current.projects.map((project) => project.id === id ? { ...project, [key]: value } : project) }));
   const addProject = () => setPortfolio({ ...portfolio, projects: [...portfolio.projects, { id: `project-${Date.now()}`, name: '', category: '', description: '', year: String(new Date().getFullYear()), color: '#5BC0BE', url: '' }] });
 
@@ -1248,7 +1273,9 @@ function Admin() {
                 <div className="admin-image-actions"><span className="image-field-label">CV / RESUME</span><label className="image-upload-button"><FileText size={15} />{uploadingCv ? 'Uploading...' : portfolio.profile.cvUrl ? 'Replace PDF' : 'Upload PDF'}<input type="file" accept="application/pdf,.pdf" disabled={busy || uploadingCv || uploadingProject !== null || uploadingHero} onChange={uploadCv} /></label>{portfolio.profile.cvUrl && <button className="image-remove-button" onClick={() => updateProfile('cvUrl', '')}>Remove CV</button>}<span className="image-upload-hint">PDF only · up to 10 MB · Save changes to publish</span></div>
               </div>
             </div>
-            <div className="admin-section-title projects-admin-title"><span>02</span><div><h2>Selected work</h2><p>Show the projects you&apos;re proud of.</p></div><button className="add-project" onClick={addProject}><Plus size={16} /> Add project</button></div>
+            <div className="admin-section-title projects-admin-title"><span>02</span><div><h2>Skills</h2><p>Manage the tools shown on your portfolio.</p></div><button className="add-project" onClick={addSkill}><Plus size={16} /> Add skill</button></div>
+            <div className="admin-skill-list">{(Array.isArray(portfolio.profile.skills) ? portfolio.profile.skills : DEFAULT_SKILLS).map((skill, index) => <div className="admin-skill-row" key={`skill-${index}`}><AdminField label={`Skill ${String(index + 1).padStart(2, '0')}`} value={skill} onChange={(value) => updateSkill(index, value)} /><button className="admin-skill-remove" type="button" aria-label={`Remove ${skill || 'skill'}`} onClick={() => deleteSkill(index)}><Trash2 size={16} /></button></div>)}</div>
+            <div className="admin-section-title projects-admin-title"><span>03</span><div><h2>Selected work</h2><p>Show the projects you&apos;re proud of.</p></div><button className="add-project" onClick={addProject}><Plus size={16} /> Add project</button></div>
             <div className="admin-project-list">{portfolio.projects.map((project, index) => <article className="admin-project" key={project.id}><div className="admin-project-head"><span>PROJECT 0{index + 1}</span><button aria-label={`Delete ${project.name || 'project'}`} onClick={() => setPortfolio({ ...portfolio, projects: portfolio.projects.filter((item) => item.id !== project.id) })}><Trash2 size={16} /></button></div><div className="admin-form-grid"><div className="admin-image-control"><div className="admin-image-preview">{project.image ? <img src={apiUrl(project.image)} alt={`${project.name || 'Project'} cover preview`} /> : <div><ImagePlus size={22} /><span>No cover image</span></div>}</div><div className="admin-image-actions"><span className="image-field-label">PROJECT COVER</span><label className="image-upload-button"><ImagePlus size={15} />{uploadingProject === project.id ? 'Uploading...' : project.image ? 'Replace image' : 'Upload image'}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={busy || uploadingProject !== null || uploadingHero || uploadingCv} onChange={(event) => uploadProjectImage(project.id, event)} /></label>{project.image && <button className="image-remove-button" onClick={() => updateProject(project.id, 'image', '')}>Remove image</button>}<span className="image-upload-hint">JPEG, PNG, WebP, or GIF · up to 5 MB</span></div></div><AdminField label="Project name" value={project.name} onChange={(value) => updateProject(project.id, 'name', value)} /><AdminField label="Category" value={project.category} onChange={(value) => updateProject(project.id, 'category', value)} /><AdminField label="Year" value={project.year} onChange={(value) => updateProject(project.id, 'year', value)} /><AdminField label="Project URL" value={project.url} onChange={(value) => updateProject(project.id, 'url', value)} /><AdminField label="Description" value={project.description} onChange={(value) => updateProject(project.id, 'description', value)} multiline wide /></div></article>)}{!portfolio.projects.length && <div className="admin-empty">No projects yet. Add one to feature it on your site.</div>}</div>
             <div className="admin-save-bar"><span className="save-notice" role="status">{notice || error}</span><button className="admin-primary save-button" onClick={save} disabled={busy || uploadingProject !== null || uploadingHero || uploadingCv}><Save size={16} /> {busy ? 'Saving...' : 'Save changes'} <Check size={15} /></button></div>
           </> : tab === 'messages' ? <>

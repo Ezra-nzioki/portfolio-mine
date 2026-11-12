@@ -49,6 +49,7 @@ const starterPortfolio = {
     github: '',
     linkedin: '',
     availability: 'Open to select projects',
+    skills: ['React', 'Node.js', 'Express', 'MongoDB', 'Tailwind CSS', 'REST APIs', 'Render'],
   },
   projects: [
     {
