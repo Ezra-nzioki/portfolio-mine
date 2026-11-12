@@ -24,33 +24,31 @@ The production client reads its API base URL from `client/.env.production` (`VIT
 
 On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. Production defaults admin cookies to `SameSite=None` and marks them `Secure` for separately hosted frontend and API services. Set `ADMIN_COOKIE_SAME_SITE` only if you need to override that behavior.
 
-Visitors create an account with their name, email, and a password of at least 6 characters. The backend emails a six-digit verification code that expires after 10 minutes; users must verify their email before signing in. The **Forgot password?** flow sends a separate six-digit reset code to the verified email; it also expires after 10 minutes and can be used once. Passwords and verification codes are not stored in plaintext.
+Visitors register with a username, email address, WhatsApp number, and password. Registration and WhatsApp sign-in are confirmed with a generated six-digit code delivered only through WhatsApp; email is used for email/password sign-in and never receives verification or recovery codes. Codes expire after 10 minutes, are stored as purpose-bound hashes, and can be used once. Password recovery also sends its code through WhatsApp. Passwords and codes are not stored in plaintext.
 
-Email verification and password recovery require a backend email provider. **Render Free web services cannot send outbound SMTP on ports 25, 465, or 587.** Therefore, Gmail SMTP will not work on a Render Free backend even with a correct Google App Password. The backend uses Resend's HTTPS API on Render; use SMTP only on a host that permits it.
-
-For Render Free, configure Resend in the backend service's **Environment** settings:
+WhatsApp verification uses the Meta WhatsApp Cloud API. Configure these backend environment variables:
 
 | Variable | Value |
 |---|---|
-| `RESEND_API_KEY` | An API key created in your Resend account |
-| `RESEND_FROM` | A sender such as `Portfolio <accounts@your-verified-domain.com>` |
+| `WHATSAPP_ACCESS_TOKEN` | A permanent or long-lived Meta access token with WhatsApp messaging permissions |
+| `WHATSAPP_PHONE_NUMBER_ID` | The sender phone-number ID from the WhatsApp Business account |
+| `WHATSAPP_OTP_TEMPLATE_NAME` | The approved template name |
+| `WHATSAPP_OTP_LANGUAGE` | The approved template language code, such as `en_US` |
+| `WHATSAPP_GRAPH_API_VERSION` | Optional Graph API version; defaults to `v24.0` |
 
-Verify the sender domain in Resend before using it. Add these values to Render's backend service environment (not the frontend and not source control), save, and wait for the backend to redeploy. The backend sends email through Resend's HTTPS API, so no SMTP port or SMTP password is needed. When either Resend setting is present, both are required; otherwise the backend can use the configured SMTP fallback.
+Create and approve a WhatsApp message template whose body contains one text placeholder for the six-digit code, and set its exact name and language above. The recipient must be able to receive messages from the configured business number. Keep the access token on the backend only. WhatsApp accounts store the user's name, phone number, latest IP/location, and login history until an admin deletes the account.
 
-On a host that permits SMTP, Gmail can instead be configured in the backend service's **Environment** settings:
+WhatsApp verification uses the Meta WhatsApp Cloud API. Configure these backend environment variables:
 
 | Variable | Value |
 |---|---|
-| `SMTP_HOST` | `smtp.gmail.com` |
-| `SMTP_PORT` | `465` |
-| `SMTP_SECURE` | `true` |
-| `SMTP_FROM` | Your Gmail address (for example, `ezranzioki@gmail.com`) |
-| `SMTP_USER` | The same Gmail address |
-| `SMTP_PASS` | A Google App Password for that account (not your regular Gmail password) |
+| `WHATSAPP_ACCESS_TOKEN` | A Meta access token with WhatsApp messaging permissions |
+| `WHATSAPP_PHONE_NUMBER_ID` | The sender phone-number ID from the WhatsApp Business account |
+| `WHATSAPP_OTP_TEMPLATE_NAME` | The approved template name |
+| `WHATSAPP_OTP_LANGUAGE` | The approved template language code, such as `en_US` |
+| `WHATSAPP_GRAPH_API_VERSION` | Optional Graph API version; defaults to `v24.0` |
 
-Create a Google App Password in your Google Account's **Security → 2-Step Verification → App passwords** settings. Keep it secret and enter it only in the hosting provider's Environment settings, never in source control or chat. Save the settings and wait for the backend to redeploy before registering. With `MONGODB_URI` configured, accounts are stored in the `emailaccounts` collection; without MongoDB, account data is temporary and is lost when the backend restarts. The backend rate-limits sign-in, registration, and verification attempts. Account names, email addresses, IP addresses, and approximate locations are retained until an admin deletes them from Admin → Users. Existing Google sign-in records remain in the legacy `users` collection and can be removed from that admin page; Google sign-in is no longer available.
-
-Render documents this restriction in its [Free web services limitations](https://render.com/docs/free#other-limitations).
+Create and approve a WhatsApp authentication template with a text placeholder for the code. Add these values to the backend host's environment, keep the access token private, and redeploy. The code is generated by the backend, sent by Meta, and accepted only after it matches the account-bound hash and has not expired. With `MONGODB_URI` configured, accounts are stored in `emailaccounts`; without MongoDB, account data is temporary and is lost when the backend restarts. Usernames, email addresses, WhatsApp numbers, IP addresses, and approximate locations are retained until an admin deletes the account.
 
 ## MongoDB persistence
 
@@ -66,7 +64,7 @@ Build the client with `npm run build --prefix client`; then start the API with `
 
 Hero and project cover images can be uploaded from the admin workspace as JPEG, PNG, WebP, or GIF files up to 5 MB. A PDF CV up to 10 MB can also be uploaded; the public portfolio shows a download button when one is saved. Uploads are stored in Cloudinary, and their secure URLs are saved in MongoDB. In the Cloudinary dashboard, find the cloud name and API key under **Settings → API Keys**, then set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in the backend service environment. Keep these credentials on the backend only; never add them to the frontend environment. Existing image paths from local storage must be re-uploaded from Admin.
 
-The Admin **Analytics** tab tracks page and section views, refreshes every five seconds, and includes a seven-day chart, most-viewed section, and recent visitor details. Visitors must opt in using the on-site analytics notice; declining disables this additional analytics tracking. For visitors who opt in, the backend stores their IP address, approximate GeoIP location, and a random browser ID for up to 90 days. The local GeoIP database does not send visitor IP addresses to a lookup service. Email/password accounts separately store the user's name, email, and latest IP/location in MongoDB until an admin deletes the account. Analytics persist in MongoDB when configured and otherwise remain in memory until the backend restarts.
+The Admin **Analytics** tab tracks page and section views, refreshes every five seconds, and includes a seven-day chart, most-viewed section, and recent visitor details. Visitors must opt in using the on-site analytics notice; declining disables this additional analytics tracking. For visitors who opt in, the backend stores their IP address, approximate GeoIP location, and a random browser ID for up to 90 days. The local GeoIP database does not send visitor IP addresses to a lookup service. Visitor accounts store the username, email, WhatsApp number, and latest IP/location in MongoDB until an admin deletes the account. Analytics persist in MongoDB when configured and otherwise remain in memory until the backend restarts.
 
 The starter project entries are sample content. Update the profile and projects in the admin workspace before publishing.
 

@@ -874,10 +874,15 @@ body { background-color: #0F4C5C; background-image: radial-gradient(ellipse at 8
 .email-login-panel { width: min(100%, 520px); display: flex; flex-direction: column; align-items: flex-start; gap: 18px; padding: clamp(24px, 6vw, 42px); border: 1px solid #ffffff24; border-radius: 18px; background: linear-gradient(145deg, #34451f, #283618 68%); box-shadow: 0 24px 75px #071e2a66; }
 .email-login-panel h1 { margin: 0; color: #FFFFFF; font-size: clamp(30px, 8vw, 42px); letter-spacing: -.05em; }
 .email-login-panel > p { margin: 0; color: #F0E5E5; font-size: 12px; line-height: 1.8; }
+.auth-method-switch { width: 100%; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border: 1px solid #ffffff34; border-radius: 8px; background: #0F4C5C55; }
+.auth-method-switch button { min-height: 36px; border: 0; border-radius: 5px; background: transparent; color: #F0E5E5; cursor: pointer; font: 10px var(--mono); }
+.auth-method-switch button.active { background: #FFFFFF; color: #0F4C5C; }
 .email-login-form { width: 100%; display: flex; flex-direction: column; gap: 14px; }
 .email-login-form label { display: flex; flex-direction: column; gap: 8px; color: #F0E5E5; font: 10px var(--mono); }
 .email-login-form input { width: 100%; min-height: 46px; padding: 0 13px; border: 1px solid #ffffff34; border-radius: 8px; outline: 0; background: #FFFFFF; color: #0F4C5C; font: 13px var(--ui-font); transition: border-color .2s, box-shadow .2s; }
 .email-login-form input:focus { border-color: #FB8B24; box-shadow: 0 0 0 3px #FB8B2433; }
+.email-login-form .whatsapp-consent { display: grid; grid-template-columns: 18px 1fr; align-items: start; gap: 9px; font: 10px var(--ui-font); line-height: 1.6; }
+.email-login-form .whatsapp-consent input { width: 16px; min-height: 16px; margin: 1px 0 0; accent-color: #FB8B24; }
 .email-login-hint { color: #F0E5E5; font: 8px var(--mono); }
 .email-sign-in-button { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; padding: 0 16px; border: 0; border-radius: 8px; background: #FB8B24; color: #0F4C5C; cursor: pointer; font-size: 11px; font-weight: 700; transition: background .2s, transform .2s; }
 .email-sign-in-button:hover:not(:disabled) { background: #FFFFFF; }.email-sign-in-button:disabled { opacity: .65; cursor: wait; }
