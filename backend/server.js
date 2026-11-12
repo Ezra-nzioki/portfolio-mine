@@ -1,23 +1,28 @@
-const path = require('node:path');
-const { Readable } = require('node:stream');
-const crypto = require('node:crypto');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Readable } from 'node:stream';
+import crypto from 'node:crypto';
+import dotenv from 'dotenv';
+import express from 'express';
+import bcrypt from 'bcryptjs';
+import cookieParser from 'cookie-parser';
+import cloudinaryPackage from 'cloudinary';
+import geoip from 'geoip-lite';
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
+import multer from 'multer';
+import nodemailer from 'nodemailer';
 
-const express = require('express');
-const bcrypt = require('bcryptjs');
-const cookieParser = require('cookie-parser');
-const cloudinary = require('cloudinary').v2;
-const geoip = require('geoip-lite');
-const jwt = require('jsonwebtoken');
-const mongoose = require('mongoose');
-const multer = require('multer');
-
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '.env') });
+const cloudinary = cloudinaryPackage.v2;
 const app = express();
+const authRouter = express.Router();
 const port = process.env.PORT || 4000;
-const tokenSecret = process.env.JWT_SECRET || require('node:crypto').randomBytes(32).toString('hex');
-const dummyPasswordHash = bcrypt.hashSync(require('node:crypto').randomBytes(32).toString('hex'), 12);
+const tokenSecret = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const dummyPasswordHash = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 12);
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
-const whatsappCodeSecret = tokenSecret;
+const emailCodeSecret = tokenSecret;
 const frontendOrigins = new Set((process.env.FRONTEND_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean));
 const adminCookieSameSite = process.env.ADMIN_COOKIE_SAME_SITE || (process.env.NODE_ENV === 'production' ? 'none' : 'strict');
 const cloudinaryConfigured = Boolean(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
@@ -130,9 +135,9 @@ const EmailAccount = mongoose.model('EmailAccount', new mongoose.Schema({
   passwordHash: { type: String, required: true, select: false },
   emailVerified: { type: Boolean, default: true },
   phoneVerified: { type: Boolean, default: true },
-  whatsappCodeHash: { type: String, select: false },
-  whatsappCodeExpiresAt: { type: Date, select: false },
-  whatsappCodePurpose: { type: String, select: false },
+  emailCodeHash: { type: String, select: false },
+  emailCodeExpiresAt: { type: Date, select: false },
+  emailCodePurpose: { type: String, select: false },
   ipAddress: { type: String, required: true },
   city: { type: String, default: '' },
   region: { type: String, default: '' },
@@ -272,111 +277,77 @@ function setVisitorSession(req, res, userId, provider = 'email') {
   });
 }
 
-function getWhatsAppConfig() {
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN?.trim();
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID?.trim();
-  const templateName = process.env.WHATSAPP_OTP_TEMPLATE_NAME?.trim();
-  if (!accessToken || !phoneNumberId || !templateName) return null;
-  return {
-    accessToken,
-    phoneNumberId,
-    templateName,
-    language: process.env.WHATSAPP_OTP_LANGUAGE?.trim() || 'en_US',
-    graphApiVersion: process.env.WHATSAPP_GRAPH_API_VERSION?.trim() || 'v24.0',
-  };
+let emailTransporter;
+
+function getEmailTransporter() {
+  const user = process.env.EMAIL_USER?.trim();
+  const pass = process.env.EMAIL_PASS?.trim();
+  if (!user || !pass) return null;
+  if (emailTransporter) return emailTransporter;
+  const host = process.env.EMAIL_HOST?.trim();
+  const port = Number(process.env.EMAIL_PORT) || 587;
+  emailTransporter = nodemailer.createTransport({
+    ...(host ? { host, port, secure: process.env.EMAIL_SECURE === 'true' || port === 465 } : { service: 'gmail' }),
+    auth: { user, pass },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
+  });
+  return emailTransporter;
 }
 
-async function sendWhatsAppMessage(phone, code) {
-  const config = getWhatsAppConfig();
-  if (!config) {
-    const error = new Error('WhatsApp verification is not configured.');
-    error.responseCode = 503;
-    throw error;
-  }
-  let response;
-  try {
-    response = await fetch(`https://graph.facebook.com/${config.graphApiVersion}/${config.phoneNumberId}/messages`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${config.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: phone.slice(1),
-        type: 'template',
-        template: {
-          name: config.templateName,
-          language: { code: config.language },
-          components: [{
-            type: 'body',
-            parameters: [{ type: 'text', text: code }],
-          }],
-        },
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-  } catch (cause) {
-    const error = new Error('Could not connect to Meta WhatsApp Cloud API.', { cause });
-    error.code = cause.code || cause.cause?.code;
-    throw error;
-  }
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.messages?.some((message) => message.id)) {
-    const error = new Error('Meta rejected the WhatsApp message request.');
-    error.responseCode = response.status;
-    error.providerErrorCode = result.error?.code;
-    throw error;
-  }
-  return result;
-}
-
-function hashWhatsAppCode(userId, phone, purpose, code) {
-  return crypto.createHmac('sha256', whatsappCodeSecret)
-    .update(`${userId}:whatsapp:${phone}:${purpose}:${code}`)
+function hashEmailCode(userId, email, purpose, code) {
+  return crypto.createHmac('sha256', emailCodeSecret)
+    .update(`${userId}:email:${email}:${purpose}:${code}`)
     .digest('hex');
 }
 
-async function sendWhatsAppCode(user, purpose) {
+async function sendEmailCode(user, purpose) {
+  const transporter = getEmailTransporter();
+  if (!transporter) {
+    const error = new Error('Email verification is not configured.');
+    error.responseCode = 503;
+    throw error;
+  }
   const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  const codeHash = hashWhatsAppCode(user._id, user.phone, purpose, code);
+  const codeHash = hashEmailCode(user._id, user.email, purpose, code);
   if (mongoose.connection.readyState === 1) {
     await EmailAccount.findByIdAndUpdate(user._id, {
-      $set: { whatsappCodeHash: codeHash, whatsappCodeExpiresAt: expiresAt, whatsappCodePurpose: purpose },
+      $set: { emailCodeHash: codeHash, emailCodeExpiresAt: expiresAt, emailCodePurpose: purpose },
     });
   } else {
-    user.whatsappCodeHash = codeHash;
-    user.whatsappCodeExpiresAt = expiresAt;
-    user.whatsappCodePurpose = purpose;
+    user.emailCodeHash = codeHash;
+    user.emailCodeExpiresAt = expiresAt;
+    user.emailCodePurpose = purpose;
   }
   try {
-    await sendWhatsAppMessage(user.phone, code);
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM?.trim() || process.env.EMAIL_USER.trim(),
+      to: user.email,
+      subject: purpose === 'password-reset' ? 'Your password reset code' : 'Your email verification code',
+      text: `Your verification code is ${code}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
+      html: `<p>Your verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes. If you did not request this, you can ignore this email.</p>`,
+    });
   } catch (error) {
     if (mongoose.connection.readyState === 1) {
       await EmailAccount.findByIdAndUpdate(user._id, {
-        $unset: { whatsappCodeHash: 1, whatsappCodeExpiresAt: 1, whatsappCodePurpose: 1 },
+        $unset: { emailCodeHash: 1, emailCodeExpiresAt: 1, emailCodePurpose: 1 },
       });
     } else {
-      delete user.whatsappCodeHash;
-      delete user.whatsappCodeExpiresAt;
-      delete user.whatsappCodePurpose;
+      delete user.emailCodeHash;
+      delete user.emailCodeExpiresAt;
+      delete user.emailCodePurpose;
     }
     throw error;
   }
 }
 
-function getWhatsAppDeliveryErrorMessage(error) {
-  if (Number(error?.responseCode) === 401) {
-    return 'WhatsApp rejected the access token. Check WHATSAPP_ACCESS_TOKEN in the backend environment.';
-  }
-  if ([400, 403].includes(Number(error?.responseCode))) {
-    return 'WhatsApp rejected the sender, recipient, or template. Check the phone number ID and approved template settings in Meta, and ensure the recipient has opted in.';
-  }
+function getEmailDeliveryErrorMessage(error) {
   if (error?.responseCode === 503) {
-    return 'WhatsApp verification is not configured. Set the Meta WhatsApp credentials and approved OTP template in the backend environment.';
+    return 'Email verification is not configured. Set EMAIL_USER and EMAIL_PASS in the backend environment.';
   }
-  return 'The backend could not send a WhatsApp code. Check Meta Cloud API connectivity and configuration.';
+  return 'The backend could not send an email code. Check the SMTP credentials and email service settings.';
 }
 
 function requireDatabase(req, res, next) {
@@ -519,42 +490,42 @@ app.post('/api/admin/logout', (req, res) => {
 
 app.get('/api/admin/session', requireAdmin, (req, res) => res.json({ username: req.admin.username }));
 
-app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, res, next) => {
-  const name = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireDatabase, async (req, res, next) => {
+  const requestedName = typeof req.body.username === 'string' ? req.body.username.trim() : '';
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
-  const whatsappConsent = req.body.whatsappConsent === true;
-  if (!name || name.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200
-    || !/^\+[1-9]\d{7,14}$/.test(phone)) {
-    return res.status(400).json({ error: 'Enter a username, valid email address, and WhatsApp number in international format.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200
+    || (phone && !/^\+[1-9]\d{7,14}$/.test(phone))) {
+    return res.status(400).json({ error: 'Enter a valid email address and, if provided, a phone number in international format.' });
   }
+  const name = requestedName || email.split('@')[0];
+  if (name.length > 100) return res.status(400).json({ error: 'Your username must be no more than 100 characters.' });
   if (password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
     return res.status(400).json({ error: 'Use a password of at least 6 characters and no more than 72 bytes.' });
   }
-  if (!whatsappConsent) return res.status(400).json({ error: 'Consent is required to send a verification code to WhatsApp.' });
-  if (!getWhatsAppConfig()) {
-    return res.status(503).json({ error: getWhatsAppDeliveryErrorMessage({ responseCode: 503 }) });
+  if (!getEmailTransporter()) {
+    return res.status(503).json({ error: getEmailDeliveryErrorMessage({ responseCode: 503 }) });
   }
 
   try {
     const ipAddress = req.ip?.replace(/^::ffff:/, '');
     if (!ipAddress) return res.status(400).json({ error: 'Your registration could not be completed. Please try again.' });
     if (mongoose.connection.readyState === 1) {
-      if (await EmailAccount.exists({ $or: [{ email }, { phone }] })) {
-        return res.status(409).json({ error: 'An account with this email or WhatsApp number already exists.' });
+      if (await EmailAccount.exists({ $or: [{ email }, ...(phone ? [{ phone }] : [])] })) {
+        return res.status(409).json({ error: 'An account with this email or phone number already exists.' });
       }
-    } else if ([...memoryUsers.values()].some((account) => account.email === email || account.phone === phone)) {
-      return res.status(409).json({ error: 'An account with this email or WhatsApp number already exists.' });
+    } else if ([...memoryUsers.values()].some((account) => account.email === email || (phone && account.phone === phone))) {
+      return res.status(409).json({ error: 'An account with this email or phone number already exists.' });
     }
     const location = geoip.lookup(ipAddress);
     const accountData = {
       name,
       email,
-      phone,
+      ...(phone ? { phone } : {}),
       passwordHash: await bcrypt.hash(password, 12),
-      emailVerified: true,
-      phoneVerified: false,
+      emailVerified: false,
+      phoneVerified: true,
       ipAddress,
       city: location?.city || '',
       region: location?.region || '',
@@ -575,67 +546,63 @@ app.post('/api/auth/register', limitAuthAttempts, requireDatabase, async (req, r
         return memoryAccount;
       })();
     try {
-      await sendWhatsAppCode(account, 'registration');
+      await sendEmailCode(account, 'registration');
     } catch (error) {
-      console.error('WhatsApp registration code delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode, providerErrorCode: error.providerErrorCode });
+      console.error('Email registration code delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
       if (mongoose.connection.readyState === 1) await EmailAccount.findByIdAndDelete(account._id);
       else memoryUsers.delete(account._id.toString());
-      return res.status(502).json({ error: getWhatsAppDeliveryErrorMessage(error) });
+      return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
     }
-    return res.status(201).json({ message: 'A verification code has been sent to your WhatsApp number.' });
+    return res.status(201).json({ message: 'A verification code has been sent to your email address.' });
   } catch (error) {
-    if (error.code === 11000) return res.status(409).json({ error: 'An account with this email or WhatsApp number already exists.' });
+    if (error.code === 11000) return res.status(409).json({ error: 'An account with this email or phone number already exists.' });
     return next(error);
   }
 });
 
-app.post('/api/auth/whatsapp/send-code', limitAuthAttempts, requireDatabase, async (req, res, next) => {
-  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
-  if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    return res.status(400).json({ error: 'Enter a WhatsApp number in international format, such as +14155552671.' });
+app.post('/api/auth/email/send-code', limitAuthAttempts, requireDatabase, async (req, res, next) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
+    return res.status(400).json({ error: 'Enter a valid email address.' });
   }
-  if (!getWhatsAppConfig()) {
-    return res.status(503).json({ error: getWhatsAppDeliveryErrorMessage({ responseCode: 503 }) });
+  if (!getEmailTransporter()) {
+    return res.status(503).json({ error: getEmailDeliveryErrorMessage({ responseCode: 503 }) });
   }
   try {
     const account = mongoose.connection.readyState === 1
-      ? await EmailAccount.findOne({ phone, phoneVerified: true, emailVerified: { $ne: false } })
-      : [...memoryUsers.values()].find((user) => user.phone === phone && user.phoneVerified !== false && user.emailVerified !== false);
-    if (account) await sendWhatsAppCode(account, 'login');
-    return res.json({ message: 'If an account exists for that number, a WhatsApp code has been sent.' });
+      ? await EmailAccount.findOne({ email })
+      : [...memoryUsers.values()].find((user) => user.email === email);
+    if (account) await sendEmailCode(account, account.emailVerified === false ? 'registration' : 'login');
+    return res.json({ message: 'If an account exists for that email, a sign-in code has been sent.' });
   } catch (error) {
-    console.error('WhatsApp login code delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode, providerErrorCode: error.providerErrorCode });
-    return res.status(502).json({ error: getWhatsAppDeliveryErrorMessage(error) });
+    console.error('Email sign-in code delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
+    return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
   }
 });
 
-app.post('/api/auth/whatsapp/verify', limitAuthAttempts, requireDatabase, async (req, res, next) => {
-  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
-  const code = typeof req.body.code === 'string' ? req.body.code.trim() : '';
-  const purpose = typeof req.body.purpose === 'string' ? req.body.purpose : '';
-  if (!/^\+[1-9]\d{7,14}$/.test(phone) || !/^\d{6}$/.test(code)) {
-    return res.status(400).json({ error: 'Enter the WhatsApp number and six-digit code.' });
-  }
-  if (!['registration', 'login'].includes(purpose)) {
-    return res.status(400).json({ error: 'Request a new WhatsApp code and try again.' });
+authRouter.post(['/api/auth/verify', '/verify'], limitAuthAttempts, requireDatabase, async (req, res, next) => {
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body.enteredToken === 'string' ? req.body.enteredToken.trim() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200 || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Enter the email address and six-digit verification code.' });
   }
   try {
     const account = mongoose.connection.readyState === 1
-      ? await EmailAccount.findOne({ phone }).select('+whatsappCodeHash +whatsappCodeExpiresAt +whatsappCodePurpose')
-      : [...memoryUsers.values()].find((user) => user.phone === phone);
-    const storedHash = account?.whatsappCodeHash;
+      ? await EmailAccount.findOne({ email }).select('+emailCodeHash +emailCodeExpiresAt +emailCodePurpose')
+      : [...memoryUsers.values()].find((user) => user.email === email);
+    const storedHash = account?.emailCodeHash;
+    const purpose = account?.emailCodePurpose;
     const codeIsValid = typeof storedHash === 'string'
       && /^[a-f\d]{64}$/i.test(storedHash)
-      && account.whatsappCodePurpose === purpose
-      && account.whatsappCodeExpiresAt > new Date()
+      && ['registration', 'login'].includes(purpose)
+      && account.emailCodeExpiresAt > new Date()
       && crypto.timingSafeEqual(
         Buffer.from(storedHash, 'hex'),
-        Buffer.from(hashWhatsAppCode(account._id, phone, purpose, code), 'hex'),
+        Buffer.from(hashEmailCode(account._id, email, purpose, code), 'hex'),
       );
-    if (!account || account.emailVerified === false || !codeIsValid
-      || (purpose === 'registration' && account.phoneVerified !== false)
-      || (purpose === 'login' && account.phoneVerified === false)) {
-      return res.status(400).json({ error: 'That WhatsApp code is invalid or expired. Request a new code and try again.' });
+    if (!account || !codeIsValid || (purpose === 'registration' && account.emailVerified !== false)
+      || (purpose === 'login' && account.emailVerified === false)) {
+      return res.status(400).json({ error: 'That email code is invalid or expired. Request a new code and try again.' });
     }
 
     const ipAddress = req.ip?.replace(/^::ffff:/, '');
@@ -645,12 +612,12 @@ app.post('/api/auth/whatsapp/verify', limitAuthAttempts, requireDatabase, async 
     if (mongoose.connection.readyState === 1) {
       const result = await EmailAccount.updateOne({
         _id: account._id,
-        whatsappCodeHash: storedHash,
-        whatsappCodePurpose: purpose,
-        whatsappCodeExpiresAt: { $gt: now },
+        emailCodeHash: storedHash,
+        emailCodePurpose: purpose,
+        emailCodeExpiresAt: { $gt: now },
       }, {
         $set: {
-          phoneVerified: true,
+          emailVerified: true,
           ipAddress,
           city: location?.city || '',
           region: location?.region || '',
@@ -658,14 +625,14 @@ app.post('/api/auth/whatsapp/verify', limitAuthAttempts, requireDatabase, async 
           lastSeen: now,
         },
         $inc: { loginCount: 1 },
-        $unset: { whatsappCodeHash: 1, whatsappCodeExpiresAt: 1, whatsappCodePurpose: 1 },
+        $unset: { emailCodeHash: 1, emailCodeExpiresAt: 1, emailCodePurpose: 1 },
       });
       if (result.modifiedCount !== 1) {
-        return res.status(400).json({ error: 'That WhatsApp code is invalid or expired. Request a new code and try again.' });
+        return res.status(400).json({ error: 'That email code is invalid or expired. Request a new code and try again.' });
       }
     } else {
       Object.assign(account, {
-        phoneVerified: true,
+        emailVerified: true,
         ipAddress,
         city: location?.city || '',
         region: location?.region || '',
@@ -673,46 +640,46 @@ app.post('/api/auth/whatsapp/verify', limitAuthAttempts, requireDatabase, async 
         lastSeen: now,
         loginCount: account.loginCount + 1,
       });
-      delete account.whatsappCodeHash;
-      delete account.whatsappCodeExpiresAt;
-      delete account.whatsappCodePurpose;
+      delete account.emailCodeHash;
+      delete account.emailCodeExpiresAt;
+      delete account.emailCodePurpose;
     }
     setVisitorSession(req, res, account._id);
-    return res.json({ user: { name: account.name, email: account.email, phone } });
+    return res.json({ user: { name: account.name, email: account.email, phone: account.phone } });
   } catch (error) {
     return next(error);
   }
 });
 
 app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async (req, res, next) => {
-  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
-  if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    return res.status(400).json({ error: 'Enter a WhatsApp number in international format, such as +14155552671.' });
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
+    return res.status(400).json({ error: 'Enter a valid email address.' });
   }
-  if (!getWhatsAppConfig()) {
-    return res.status(503).json({ error: getWhatsAppDeliveryErrorMessage({ responseCode: 503 }) });
+  if (!getEmailTransporter()) {
+    return res.status(503).json({ error: getEmailDeliveryErrorMessage({ responseCode: 503 }) });
   }
 
   try {
     const user = mongoose.connection.readyState === 1
-      ? await EmailAccount.findOne({ phone, phoneVerified: true, emailVerified: { $ne: false } })
-      : [...memoryUsers.values()].find((account) => account.phone === phone && account.phoneVerified !== false && account.emailVerified !== false);
+      ? await EmailAccount.findOne({ email, emailVerified: true })
+      : [...memoryUsers.values()].find((account) => account.email === email && account.emailVerified !== false);
     if (user) {
-      await sendWhatsAppCode(user, 'password-reset');
+      await sendEmailCode(user, 'password-reset');
     }
-    return res.json({ message: 'If a verified account exists for that number, a password reset code has been sent on WhatsApp.' });
+    return res.json({ message: 'If a verified account exists for that email, a password reset code has been sent.' });
   } catch (error) {
-    console.error('WhatsApp password recovery delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode, providerErrorCode: error.providerErrorCode });
-    return res.status(502).json({ error: getWhatsAppDeliveryErrorMessage(error) });
+    console.error('Email password recovery delivery failed:', { code: error.code || 'UNKNOWN', responseCode: error.responseCode });
+    return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
   }
 });
 
 app.post('/api/auth/reset-password', limitAuthAttempts, requireDatabase, async (req, res, next) => {
-  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
-  const code = typeof req.body.code === 'string' ? req.body.code.trim() : '';
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body.enteredToken === 'string' ? req.body.enteredToken.trim() : '';
   const password = typeof req.body.password === 'string' ? req.body.password : '';
-  if (!/^\+[1-9]\d{7,14}$/.test(phone) || !/^\d{6}$/.test(code)) {
-    return res.status(400).json({ error: 'Enter the WhatsApp number and six-digit reset code.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200 || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Enter the email address and six-digit reset code.' });
   }
   if (password.length < 6 || Buffer.byteLength(password, 'utf8') > 72) {
     return res.status(400).json({ error: 'Use a password of at least 6 characters and no more than 72 bytes.' });
@@ -720,17 +687,17 @@ app.post('/api/auth/reset-password', limitAuthAttempts, requireDatabase, async (
 
   try {
     const user = mongoose.connection.readyState === 1
-      ? await EmailAccount.findOne({ phone, phoneVerified: true, emailVerified: { $ne: false } })
-        .select('+whatsappCodeHash +whatsappCodeExpiresAt +whatsappCodePurpose')
-      : [...memoryUsers.values()].find((account) => account.phone === phone && account.phoneVerified !== false && account.emailVerified !== false);
-    const storedHash = user?.whatsappCodeHash;
+      ? await EmailAccount.findOne({ email, emailVerified: true })
+        .select('+emailCodeHash +emailCodeExpiresAt +emailCodePurpose')
+      : [...memoryUsers.values()].find((account) => account.email === email && account.emailVerified === true);
+    const storedHash = user?.emailCodeHash;
     const codeIsValid = typeof storedHash === 'string'
       && /^[a-f\d]{64}$/i.test(storedHash)
-      && user.whatsappCodePurpose === 'password-reset'
-      && user.whatsappCodeExpiresAt > new Date()
+      && user.emailCodePurpose === 'password-reset'
+      && user.emailCodeExpiresAt > new Date()
       && crypto.timingSafeEqual(
         Buffer.from(storedHash, 'hex'),
-        Buffer.from(hashWhatsAppCode(user._id, phone, 'password-reset', code), 'hex'),
+        Buffer.from(hashEmailCode(user._id, email, 'password-reset', code), 'hex'),
       );
     if (!user || !codeIsValid) {
       return res.status(400).json({ error: 'That password reset code is invalid or expired. Request a new code and try again.' });
@@ -740,22 +707,22 @@ app.post('/api/auth/reset-password', limitAuthAttempts, requireDatabase, async (
     if (mongoose.connection.readyState === 1) {
       const result = await EmailAccount.updateOne({
         _id: user._id,
-        whatsappCodeHash: storedHash,
-        whatsappCodePurpose: 'password-reset',
-        whatsappCodeExpiresAt: { $gt: new Date() },
-        emailVerified: { $ne: false },
+        emailCodeHash: storedHash,
+        emailCodePurpose: 'password-reset',
+        emailCodeExpiresAt: { $gt: new Date() },
+        emailVerified: true,
       }, {
         $set: { passwordHash },
-        $unset: { whatsappCodeHash: 1, whatsappCodeExpiresAt: 1, whatsappCodePurpose: 1 },
+        $unset: { emailCodeHash: 1, emailCodeExpiresAt: 1, emailCodePurpose: 1 },
       });
       if (result.modifiedCount !== 1) {
         return res.status(400).json({ error: 'That password reset code is invalid or expired. Request a new code and try again.' });
       }
     } else {
       user.passwordHash = passwordHash;
-      delete user.whatsappCodeHash;
-      delete user.whatsappCodeExpiresAt;
-      delete user.whatsappCodePurpose;
+      delete user.emailCodeHash;
+      delete user.emailCodeExpiresAt;
+      delete user.emailCodePurpose;
     }
     return res.json({ message: 'Your password has been reset. You can now sign in.' });
   } catch (error) {
@@ -779,8 +746,8 @@ app.post('/api/auth/login', limitAuthAttempts, requireDatabase, async (req, res,
     if (!user || !passwordMatches) {
       return res.status(401).json({ error: 'Email or password is incorrect.' });
     }
-    if (user.emailVerified === false || user.phoneVerified === false) {
-      return res.status(403).json({ error: 'Verify your WhatsApp number before signing in.' });
+    if (user.emailVerified === false) {
+      return res.status(403).json({ error: 'Verify your email address before signing in.' });
     }
 
     const ipAddress = req.ip?.replace(/^::ffff:/, '');
@@ -1087,6 +1054,7 @@ app.delete('/api/admin/users/:id', requireAdmin, requireDatabase, async (req, re
   }
 });
 
+app.use(authRouter);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'API route not found.' }));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -1139,3 +1107,5 @@ startServer().catch((error) => {
   console.error('Failed to initialize admin authentication; the server was not started.', error);
   process.exitCode = 1;
 });
+
+export { authRouter };

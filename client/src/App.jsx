@@ -212,13 +212,12 @@ function App() {
 function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {}, onAdminSignIn = () => {} }) {
   const [authMethod, setAuthMethod] = useState('email');
   const [registering, setRegistering] = useState(false);
-  const [whatsappCodePending, setWhatsappCodePending] = useState(false);
+  const [emailCodePending, setEmailCodePending] = useState(false);
   const [codePurpose, setCodePurpose] = useState('');
   const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [whatsappConsent, setWhatsappConsent] = useState(false);
   const [password, setPassword] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [formError, setFormError] = useState('');
@@ -231,47 +230,47 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
     setFormError('');
     setFormNotice('');
     try {
-      if (whatsappCodePending) {
+      if (emailCodePending) {
         if (codePurpose === 'password-reset') {
           const result = await api('/api/auth/reset-password', {
             method: 'POST',
-            body: JSON.stringify({ phone, code: verificationCode, password }),
+            body: JSON.stringify({ email, enteredToken: verificationCode, password }),
           });
-          setWhatsappCodePending(false);
+          setEmailCodePending(false);
           setCodePurpose('');
           setPasswordRecovery(false);
           setVerificationCode('');
           setPassword('');
           setFormNotice(result.message);
         } else {
-          const result = await api('/api/auth/whatsapp/verify', {
+          const result = await api('/api/auth/verify', {
             method: 'POST',
-            body: JSON.stringify({ phone, code: verificationCode, purpose: codePurpose }),
+            body: JSON.stringify({ email, enteredToken: verificationCode }),
           });
           onSignedIn(result.user);
         }
       } else if (passwordRecovery) {
         const result = await api('/api/auth/forgot-password', {
           method: 'POST',
-          body: JSON.stringify({ phone }),
+          body: JSON.stringify({ email }),
         });
-        setWhatsappCodePending(true);
+        setEmailCodePending(true);
         setCodePurpose('password-reset');
         setFormNotice(result.message);
       } else if (registering) {
         const result = await api('/api/auth/register', {
           method: 'POST',
-          body: JSON.stringify({ username: name, email, phone, password, whatsappConsent }),
+          body: JSON.stringify({ username: name, email, phone, password }),
         });
-        setWhatsappCodePending(true);
+        setEmailCodePending(true);
         setCodePurpose('registration');
         setFormNotice(result.message);
-      } else if (authMethod === 'whatsapp') {
-        const result = await api('/api/auth/whatsapp/send-code', {
+      } else if (authMethod === 'code') {
+        const result = await api('/api/auth/email/send-code', {
           method: 'POST',
-          body: JSON.stringify({ phone }),
+          body: JSON.stringify({ email }),
         });
-        setWhatsappCodePending(true);
+        setEmailCodePending(true);
         setCodePurpose('login');
         setFormNotice(result.message);
       } else {
@@ -289,74 +288,71 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
   }
 
   function returnToLogin() {
-    setWhatsappCodePending(false);
+    setEmailCodePending(false);
     setCodePurpose('');
     setPasswordRecovery(false);
     setRegistering(false);
     setPassword('');
     setVerificationCode('');
-    setWhatsappConsent(false);
     setFormError('');
     setFormNotice('');
   }
 
   const isRecoveryView = passwordRecovery;
-  const isCodeView = whatsappCodePending;
+  const isCodeView = emailCodePending;
   const codeHeading = codePurpose === 'password-reset'
     ? 'Reset your password.'
-    : 'Check your WhatsApp.';
+    : 'Check your email.';
 
   return (
     <main className="email-login-shell">
       <a className="wordmark" href="/" aria-label="Ezra Devs home">EZRA<span>.</span>DEVS</a>
       <section className="email-login-panel">
         <span className="section-kicker">WELCOME TO THE PORTFOLIO</span>
-        <h1>{loading ? 'Checking your sign-in...' : whatsappCodePending ? codeHeading : passwordRecovery ? 'Reset your password.' : registering ? 'Create your account.' : 'Sign in to continue.'}</h1>
-        <p>{whatsappCodePending
+        <h1>{loading ? 'Checking your sign-in...' : emailCodePending ? codeHeading : passwordRecovery ? 'Reset your password.' : registering ? 'Create your account.' : 'Sign in to continue.'}</h1>
+        <p>{emailCodePending
           ? codePurpose === 'password-reset'
-            ? `Enter the six-digit reset code sent to ${phone}, then choose a new password. It expires in 10 minutes.`
-            : `Enter the six-digit code sent to ${phone}. It expires in 10 minutes.`
+            ? `Enter the six-digit reset code sent to ${email}, then choose a new password. It expires in 10 minutes.`
+            : `Enter the six-digit code sent to ${email}. It expires in 10 minutes.`
           : passwordRecovery
-            ? 'Enter the WhatsApp number linked to your account. If it is registered, we will send a reset code on WhatsApp.'
+            ? 'Enter the email address linked to your account. If it is registered, we will send a reset code.'
             : registering
-              ? 'Create an account with your email and password, then confirm your WhatsApp number with a one-time code. Your account details, IP address, and approximate location are stored until the site admin deletes your account.'
-              : authMethod === 'whatsapp'
-                ? 'Enter your verified WhatsApp number and we will send a one-time sign-in code.'
-                : 'Sign in with your email and password. Your WhatsApp number is verified during registration; no codes are sent to email.'}</p>
-        {!loading && !registering && !whatsappCodePending && !isRecoveryView && <div className="auth-method-switch" role="group" aria-label="Sign-in method">
-          <button type="button" className={authMethod === 'email' ? 'active' : ''} aria-pressed={authMethod === 'email'} onClick={() => { setAuthMethod('email'); setFormError(''); setFormNotice(''); }}>Email</button>
-          <button type="button" className={authMethod === 'whatsapp' ? 'active' : ''} aria-pressed={authMethod === 'whatsapp'} onClick={() => { setAuthMethod('whatsapp'); setPasswordRecovery(false); setFormError(''); setFormNotice(''); }}>WhatsApp</button>
+              ? 'Create an account with your email and password, then confirm your email with a one-time code. Your account details, IP address, and approximate location are stored until the site admin deletes your account.'
+              : authMethod === 'code'
+                ? 'Enter your email address and we will send a one-time sign-in code.'
+                : 'Sign in with your email and password. Email verification codes are sent when needed.'}</p>
+        {!loading && !registering && !emailCodePending && !isRecoveryView && <div className="auth-method-switch" role="group" aria-label="Sign-in method">
+          <button type="button" className={authMethod === 'email' ? 'active' : ''} aria-pressed={authMethod === 'email'} onClick={() => { setAuthMethod('email'); setFormError(''); setFormNotice(''); }}>Email &amp; password</button>
+          <button type="button" className={authMethod === 'code' ? 'active' : ''} aria-pressed={authMethod === 'code'} onClick={() => { setAuthMethod('code'); setPasswordRecovery(false); setFormError(''); setFormNotice(''); }}>Email code</button>
         </div>}
         {!loading && <form className="email-login-form" onSubmit={submit}>
-          {whatsappCodePending
+          {emailCodePending
             ? <>
-              <label>WhatsApp code<input type="text" inputMode="numeric" autoComplete="one-time-code" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" pattern="\d{6}" required /></label>
+              <label>Email code<input type="text" inputMode="numeric" autoComplete="one-time-code" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" pattern="\d{6}" required /></label>
               {codePurpose === 'password-reset' && <>
                 <label>New password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength="6" maxLength="72" required /></label>
                 <span className="email-login-hint">Use at least 6 characters.</span>
               </>}
             </>
             : passwordRecovery
-              ? <label>WhatsApp number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="+14155552671" value={phone} onChange={(event) => setPhone(event.target.value.trimStart())} maxLength="16" pattern="\+[1-9][0-9]{7,14}" required /></label>
+              ? <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
               : registering ? <>
               <label>Username<input value={name} onChange={(event) => setName(event.target.value)} autoComplete="username" maxLength="100" required /></label>
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
-              <label>WhatsApp number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="+14155552671" value={phone} onChange={(event) => setPhone(event.target.value.trimStart())} maxLength="16" pattern="\+[1-9][0-9]{7,14}" required /></label>
+              <label>Phone number (optional)<input type="tel" inputMode="tel" autoComplete="tel" placeholder="+14155552671" value={phone} onChange={(event) => setPhone(event.target.value.trimStart())} maxLength="16" pattern="\+[1-9][0-9]{7,14}" /></label>
               <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength="6" maxLength="72" required /></label>
-              <span className="email-login-hint">Use at least 6 characters. Include the phone country code.</span>
-              <label className="whatsapp-consent"><input type="checkbox" checked={whatsappConsent} onChange={(event) => setWhatsappConsent(event.target.checked)} required />I agree to receive account verification and security codes on WhatsApp.</label>
-            </> : authMethod === 'whatsapp' ? <>
-              <label>WhatsApp number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="+14155552671" value={phone} onChange={(event) => setPhone(event.target.value.trimStart())} maxLength="16" pattern="\+[1-9][0-9]{7,14}" required /></label>
-              <span className="email-login-hint">Include the country code.</span>
+              <span className="email-login-hint">Use at least 6 characters. Include the phone country code if you add a phone number.</span>
+            </> : authMethod === 'code' ? <>
+              <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
             </> : <>
               <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" maxLength="200" required /></label>
               <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" maxLength="72" required /></label>
             </>}
-          <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : whatsappCodePending ? codePurpose === 'password-reset' ? 'Reset password' : 'Verify and continue' : passwordRecovery ? 'Send WhatsApp code' : registering ? 'Create account and send code' : authMethod === 'whatsapp' ? 'Send WhatsApp code' : 'Sign in'} <ArrowRight size={16} /></button>
+          <button className="email-sign-in-button" type="submit" disabled={busy}>{busy ? 'Please wait...' : emailCodePending ? codePurpose === 'password-reset' ? 'Reset password' : 'Verify and continue' : passwordRecovery ? 'Send email code' : registering ? 'Create account and send code' : authMethod === 'code' ? 'Send email code' : 'Sign in'} <ArrowRight size={16} /></button>
         </form>}
         {(formError || error) && <span className="email-login-error" role="alert">{formError || error}</span>}
         {formNotice && <span className="email-login-status" role="status">{formNotice}</span>}
-        {!loading && whatsappCodePending && <>
+        {!loading && emailCodePending && <>
           <button className="email-login-toggle" type="button" onClick={returnToLogin}>Back to sign in</button>
         </>}
         {!loading && passwordRecovery && <button className="email-login-toggle" type="button" onClick={returnToLogin}>Back to sign in</button>}
@@ -369,7 +365,7 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
           setPasswordRecovery(true);
           setFormError('');
           setFormNotice('');
-        }}>Forgot password? Reset with WhatsApp</button>}
+        }}>Forgot password? Reset by email</button>}
         {!loading && !isCodeView && !isRecoveryView && <button className="email-login-toggle" type="button" onClick={onAdminSignIn}>Admin? Sign in with username</button>}
       </section>
     </main>
