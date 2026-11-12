@@ -165,7 +165,6 @@ function App() {
   const [portfolio, setPortfolio] = useState(emptyPortfolio);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [authLoading, setAuthLoading] = useState(true);
   const [authUser, setAuthUser] = useState(null);
   const [authError, setAuthError] = useState('');
   const [adminMode, setAdminMode] = useState(false);
@@ -181,8 +180,6 @@ function App() {
         if (active) setAuthUser(session.user);
       } catch (error) {
         if (error.status !== 401 && active) setAuthError(error.message);
-      } finally {
-        if (active) setAuthLoading(false);
       }
     }
     checkAuthentication();
@@ -200,7 +197,6 @@ function App() {
   }, [adminMode, authUser, isAdmin]);
 
   if (isAdmin || adminMode) return <Admin />;
-  if (authLoading) return <EmailPasswordSignIn loading />;
   if (!authUser) return <EmailPasswordSignIn error={authError} onSignedIn={setAuthUser} onAdminSignIn={() => setAdminMode(true)} />;
   return <PortfolioPage portfolio={portfolio} loading={loading} loadError={loadError} user={authUser} onAdminSignIn={() => setAdminMode(true)} onSignOut={async () => {
     try {
