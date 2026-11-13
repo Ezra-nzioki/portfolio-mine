@@ -287,12 +287,20 @@ function getEmailProvider() {
   return process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'smtp';
 }
 
+function isResendConfigured() {
+  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+}
+
+function isSmtpConfigured() {
+  return Boolean(process.env.EMAIL_USER?.trim() && process.env.EMAIL_PASS?.trim());
+}
+
 function isEmailDeliveryConfigured() {
   if (getEmailProvider() === 'resend') {
-    return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+    return isResendConfigured() || isSmtpConfigured();
   }
   if (getEmailProvider() === 'smtp') {
-    return Boolean(process.env.EMAIL_USER?.trim() && process.env.EMAIL_PASS?.trim());
+    return isSmtpConfigured();
   }
   return false;
 }
@@ -314,6 +322,27 @@ function getEmailTransporter() {
   return emailTransporter;
 }
 
+async function deliverEmailWithSmtp(message) {
+  const transporter = getEmailTransporter();
+  if (!transporter) {
+    const error = new Error('SMTP email delivery is not configured.');
+    error.responseCode = 503;
+    error.provider = 'smtp';
+    throw error;
+  }
+
+  const configuredFrom = process.env.EMAIL_FROM?.trim();
+  const from = configuredFrom?.toLowerCase().includes('@resend.dev')
+    ? process.env.EMAIL_USER.trim()
+    : configuredFrom || process.env.EMAIL_USER.trim();
+  try {
+    await transporter.sendMail({ from, ...message });
+  } catch (error) {
+    error.provider = 'smtp';
+    throw error;
+  }
+}
+
 async function deliverEmail(message) {
   const provider = getEmailProvider();
   if (!isEmailDeliveryConfigured()) {
@@ -324,6 +353,11 @@ async function deliverEmail(message) {
   }
 
   if (provider === 'resend') {
+    if (!isResendConfigured()) {
+      console.warn('Resend is not configured; falling back to SMTP email delivery.');
+      return deliverEmailWithSmtp(message);
+    }
+
     let response;
     try {
       response = await fetch('https://api.resend.com/emails', {
@@ -353,22 +387,16 @@ async function deliverEmail(message) {
       error.provider = provider;
       error.responseCode = response.status;
       error.code = `RESEND_HTTP_${response.status}`;
+      if ([401, 403].includes(response.status) && isSmtpConfigured()) {
+        console.warn(`Resend rejected the email request with status ${response.status}; falling back to SMTP.`);
+        return deliverEmailWithSmtp(message);
+      }
       throw error;
     }
     return;
   }
 
-  const transporter = getEmailTransporter();
-  if (!transporter) {
-    const error = new Error('SMTP email delivery is not configured.');
-    error.responseCode = 503;
-    error.provider = provider;
-    throw error;
-  }
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM?.trim() || process.env.EMAIL_USER.trim(),
-    ...message,
-  });
+  await deliverEmailWithSmtp(message);
 }
 
 function hashEmailCode(userId, email, purpose, code) {
