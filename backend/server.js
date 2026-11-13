@@ -297,7 +297,7 @@ function isSmtpConfigured() {
 
 function isEmailDeliveryConfigured() {
   if (getEmailProvider() === 'resend') {
-    return isResendConfigured() || isSmtpConfigured();
+    return isResendConfigured();
   }
   if (getEmailProvider() === 'smtp') {
     return isSmtpConfigured();
@@ -353,11 +353,6 @@ async function deliverEmail(message) {
   }
 
   if (provider === 'resend') {
-    if (!isResendConfigured()) {
-      console.warn('Resend is not configured; falling back to SMTP email delivery.');
-      return deliverEmailWithSmtp(message);
-    }
-
     let response;
     try {
       response = await fetch('https://api.resend.com/emails', {
@@ -387,10 +382,6 @@ async function deliverEmail(message) {
       error.provider = provider;
       error.responseCode = response.status;
       error.code = `RESEND_HTTP_${response.status}`;
-      if ([401, 403].includes(response.status) && isSmtpConfigured()) {
-        console.warn(`Resend rejected the email request with status ${response.status}; falling back to SMTP.`);
-        return deliverEmailWithSmtp(message);
-      }
       throw error;
     }
     return;
