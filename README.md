@@ -24,6 +24,8 @@ The production client reads its API base URL from `client/.env.production` (`VIT
 
 On the backend host, set `FRONTEND_ORIGINS` to the exact frontend origin (or a comma-separated list of origins), with no trailing slash, so the browser can access the API and send admin cookies. Production defaults admin cookies to `SameSite=None` and marks them `Secure` for separately hosted frontend and API services. Set `ADMIN_COOKIE_SAME_SITE` only if you need to override that behavior.
 
+Visitor and admin sign-in use HTTP-only cookies that persist across page refreshes and expire after 24 hours. Keep `JWT_SECRET` unchanged across backend restarts and deployments; changing or omitting it invalidates existing cookies.
+
 Use [`backend/.env.example`](./backend/.env.example) for local development. For Render, use [`backend/.env.render.example`](./backend/.env.render.example) as the complete production variable list: replace every placeholder and add the values in the backend service's **Environment** settings. Render does not load the file automatically. Keep real credentials out of source control and do not set `PORT`; the host assigns it.
 
 Visitors register with a username, email address, and password; a phone number can optionally be saved to the account. Registration verification, email-code sign-in, and password recovery send a generated six-digit code through the configured email provider. Codes expire after 10 minutes, are stored as purpose-bound hashes, and can be used once. Passwords and codes are not stored in plaintext.

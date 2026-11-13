@@ -289,6 +289,27 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
     }
   }
 
+  async function resendCode() {
+    setBusy(true);
+    setFormError('');
+    setFormNotice('');
+    try {
+      const path = codePurpose === 'password-reset'
+        ? '/api/auth/forgot-password'
+        : '/api/auth/email/send-code';
+      const result = await api(path, {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      setVerificationCode('');
+      setFormNotice(result.message);
+    } catch (requestError) {
+      setFormError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function returnToLogin() {
     setEmailCodePending(false);
     setCodePurpose('');
@@ -355,6 +376,9 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
         {(formError || error) && <span className="email-login-error" role="alert">{formError || error}</span>}
         {formNotice && <span className="email-login-status" role="status">{formNotice}</span>}
         {!loading && emailCodePending && <>
+          <button className="email-login-toggle" type="button" onClick={resendCode} disabled={busy}>
+            {busy ? 'Please wait...' : "Didn't receive a code? Send a new one"}
+          </button>
           <button className="email-login-toggle" type="button" onClick={returnToLogin}>Back to sign in</button>
         </>}
         {!loading && passwordRecovery && <button className="email-login-toggle" type="button" onClick={returnToLogin}>Back to sign in</button>}

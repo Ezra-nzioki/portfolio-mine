@@ -21,6 +21,7 @@ const authRouter = express.Router();
 const emailAddressPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const port = process.env.PORT || 4000;
 const tokenSecret = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const sessionLifetimeMs = 24 * 60 * 60 * 1000;
 const dummyPasswordHash = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 12);
 const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH || (process.env.ADMIN_PASSWORD ? bcrypt.hashSync(process.env.ADMIN_PASSWORD, 12) : '');
 const emailCodeSecret = tokenSecret;
@@ -270,12 +271,13 @@ function limitAuthAttempts(req, res, next) {
 function setVisitorSession(req, res, userId, provider = 'email') {
   const secureCookie = process.env.NODE_ENV === 'production'
     || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
-  const visitorToken = jwt.sign({ userId: userId.toString(), provider }, tokenSecret, { expiresIn: '30d' });
+  const visitorToken = jwt.sign({ userId: userId.toString(), provider }, tokenSecret, { expiresIn: '24h' });
   res.cookie('ezra_visitor', visitorToken, {
     httpOnly: true,
     secure: secureCookie,
     sameSite: adminCookieSameSite,
-    maxAge: 30 * 24 * 60 * 60 * 1000,
+    maxAge: sessionLifetimeMs,
+    path: '/',
   });
 }
 
@@ -564,14 +566,15 @@ app.post('/api/admin/login', limitAuthAttempts, async (req, res, next) => {
     const admin = await AdminAccount.findOne({ username }).select('+passwordHash');
     const valid = await bcrypt.compare(password, admin?.passwordHash || dummyPasswordHash);
     if (!admin || !valid) return res.status(401).json({ error: 'That username and password did not match.' });
-    const token = jwt.sign({ adminId: admin._id.toString() }, tokenSecret, { expiresIn: '12h' });
+    const token = jwt.sign({ adminId: admin._id.toString() }, tokenSecret, { expiresIn: '24h' });
     const secureCookie = process.env.NODE_ENV === 'production'
       || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
     res.cookie('ezra_admin', token, {
       httpOnly: true,
       secure: secureCookie,
       sameSite: adminCookieSameSite,
-      maxAge: 12 * 60 * 60 * 1000,
+      maxAge: sessionLifetimeMs,
+      path: '/',
     });
     return res.json({ username: admin.username });
   } catch (error) {
@@ -582,7 +585,7 @@ app.post('/api/admin/login', limitAuthAttempts, async (req, res, next) => {
 app.post('/api/admin/logout', (req, res) => {
   const secureCookie = process.env.NODE_ENV === 'production'
     || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
-  res.clearCookie('ezra_admin', { httpOnly: true, sameSite: adminCookieSameSite, secure: secureCookie });
+  res.clearCookie('ezra_admin', { httpOnly: true, sameSite: adminCookieSameSite, secure: secureCookie, path: '/' });
   res.status(204).end();
 });
 
@@ -926,7 +929,7 @@ app.get('/api/auth/session', requireDatabase, requireVisitor, async (req, res, n
 app.post('/api/auth/logout', (req, res) => {
   const secureCookie = process.env.NODE_ENV === 'production'
     || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
-  res.clearCookie('ezra_visitor', { httpOnly: true, secure: secureCookie, sameSite: adminCookieSameSite });
+  res.clearCookie('ezra_visitor', { httpOnly: true, secure: secureCookie, sameSite: adminCookieSameSite, path: '/' });
   return res.sendStatus(204);
 });
 
