@@ -281,6 +281,20 @@ function setVisitorSession(req, res, userId, provider = 'email') {
   });
 }
 
+function clearAuthCookies(req, res) {
+  const secureCookie = process.env.NODE_ENV === 'production'
+    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
+  const cookieOptions = {
+    httpOnly: true,
+    secure: secureCookie,
+    sameSite: adminCookieSameSite,
+    path: '/',
+  };
+  res.clearCookie('ezra_admin', cookieOptions);
+  res.clearCookie('ezra_visitor', cookieOptions);
+  return res.status(200).json({ success: true, message: 'Logged out successfully' });
+}
+
 function getEmailProvider() {
   return process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'brevo';
 }
@@ -485,10 +499,7 @@ app.post('/api/admin/login', limitAuthAttempts, async (req, res, next) => {
 });
 
 app.post('/api/admin/logout', (req, res) => {
-  const secureCookie = process.env.NODE_ENV === 'production'
-    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
-  res.clearCookie('ezra_admin', { httpOnly: true, sameSite: adminCookieSameSite, secure: secureCookie, path: '/' });
-  res.status(204).end();
+  return clearAuthCookies(req, res);
 });
 
 app.get('/api/admin/session', requireAdmin, (req, res) => res.json({ username: req.admin.username }));
@@ -831,10 +842,7 @@ app.get('/api/auth/session', requireDatabase, requireVisitor, async (req, res, n
 });
 
 app.post('/api/auth/logout', (req, res) => {
-  const secureCookie = process.env.NODE_ENV === 'production'
-    || req.get('x-forwarded-proto')?.split(',')[0] === 'https';
-  res.clearCookie('ezra_visitor', { httpOnly: true, secure: secureCookie, sameSite: adminCookieSameSite, path: '/' });
-  return res.sendStatus(204);
+  return clearAuthCookies(req, res);
 });
 
 app.post('/api/admin/cv', requireAdmin, cvUpload.single('cv'), async (req, res, next) => {

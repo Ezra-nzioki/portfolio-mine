@@ -130,6 +130,21 @@ function apiUrl(path) {
   return `${API_BASE_URL}${normalizedPath}`;
 }
 
+function clearStoredAuth() {
+  const authStorageKey = /auth|token|user|admin|session/i;
+  try {
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      for (const key of Object.keys(storage)) {
+        if (authStorageKey.test(key)) storage.removeItem(key);
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error('Could not clear stored authentication data:', error);
+    return false;
+  }
+}
+
 function getAnalyticsConsent() {
   try {
     const savedConsent = window.localStorage.getItem(ANALYTICS_CONSENT_KEY);
@@ -169,7 +184,9 @@ function App() {
   const [loadError, setLoadError] = useState('');
   const [authUser, setAuthUser] = useState(null);
   const [authError, setAuthError] = useState('');
+  const [authNotice, setAuthNotice] = useState({ message: '', isError: false });
   const [adminMode, setAdminMode] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const isAdmin = window.location.pathname.startsWith('/admin')
     || new URLSearchParams(window.location.search).get('admin') === '1';
 
@@ -198,17 +215,75 @@ function App() {
     return () => { active = false; };
   }, [adminMode, authUser, isAdmin]);
 
-  if (isAdmin || adminMode) return <Admin />;
-  if (!authUser) return <EmailPasswordSignIn error={authError} onSignedIn={setAuthUser} onAdminSignIn={() => setAdminMode(true)} />;
-  return <PortfolioPage portfolio={portfolio} loading={loading} loadError={loadError} user={authUser} onAdminSignIn={() => setAdminMode(true)} onSignOut={async () => {
+  async function signOut() {
+    setAuthError('');
+    setAuthNotice({ message: '', isError: false });
+    setSigningOut(true);
+    let logoutError = null;
     try {
       await api('/api/auth/logout', { method: 'POST' });
+    } catch (error) {
+      logoutError = error;
+    } finally {
+      const storageCleared = clearStoredAuth();
+      if (window.location.pathname !== '/' || window.location.search) {
+        window.history.replaceState({}, '', '/');
+      }
       setAuthUser(null);
       setLoading(true);
-    } catch (error) {
-      setLoadError(error.message);
+      setLoadError('');
+      setAdminMode(false);
+      setSigningOut(false);
+      setAuthNotice({
+        message: logoutError
+          ? `Signed out on this device, but server logout could not be confirmed: ${logoutError.message}`
+          : storageCleared
+            ? 'Logged out successfully'
+            : 'Logged out, but saved login data could not be cleared from this browser.',
+        isError: Boolean(logoutError) || !storageCleared,
+      });
     }
-  }} />;
+  }
+
+  const content = isAdmin || adminMode
+    ? <Admin onSignOut={signOut} signingOut={signingOut} />
+    : !authUser
+      ? <EmailPasswordSignIn error={authError} onSignedIn={setAuthUser} onAdminSignIn={() => setAdminMode(true)} />
+      : <PortfolioPage
+        portfolio={portfolio}
+        loading={loading}
+        loadError={loadError}
+        user={authUser}
+        onAdminSignIn={() => setAdminMode(true)}
+        onSignOut={signOut}
+        signingOut={signingOut}
+      />;
+
+  return <>
+    {content}
+    <FeedbackToast
+      message={authNotice.message}
+      isError={authNotice.isError}
+      onDismiss={() => setAuthNotice({ message: '', isError: false })}
+    />
+  </>;
+}
+
+function FeedbackToast({ message, isError, onDismiss }) {
+  useEffect(() => {
+    if (!message) return undefined;
+    const timeout = window.setTimeout(onDismiss, 3500);
+    return () => window.clearTimeout(timeout);
+  }, [message, onDismiss]);
+
+  if (!message) return null;
+  return (
+    <div className={`feedback-toast${isError ? ' is-error' : ''}`} role={isError ? 'alert' : 'status'} aria-live={isError ? 'assertive' : 'polite'}>
+      {isError ? <X size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}
+      <span>{message}</span>
+      <button type="button" onClick={onDismiss} aria-label="Dismiss notification"><X size={15} /></button>
+    </div>
+  );
 }
 
 function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {}, onAdminSignIn = () => {} }) {
@@ -398,7 +473,7 @@ function EmailPasswordSignIn({ loading = false, error = '', onSignedIn = () => {
   );
 }
 
-function PortfolioPage({ portfolio, loading, loadError, user, onAdminSignIn, onSignOut }) {
+function PortfolioPage({ portfolio, loading, loadError, user, onAdminSignIn, onSignOut, signingOut }) {
   const { profile, projects } = portfolio;
   const [menuOpen, setMenuOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -516,6 +591,10 @@ function PortfolioPage({ portfolio, loading, loadError, user, onAdminSignIn, onS
           <a onClick={() => setMenuOpen(false)} href="#about">About</a>
           <a onClick={() => setMenuOpen(false)} href="#stack">Stack</a>
           <a className="nav-contact" onClick={() => setMenuOpen(false)} href="#contact">Let&apos;s talk <ArrowUpRight size={14} /></a>
+          <button type="button" className="nav-logout" onClick={() => {
+            setMenuOpen(false);
+            onSignOut();
+          }} disabled={signingOut}><LogOut size={14} /> {signingOut ? 'Signing out...' : 'Sign out'}</button>
           <button type="button" className="nav-admin" onClick={() => {
             setMenuOpen(false);
             onAdminSignIn();
@@ -524,6 +603,7 @@ function PortfolioPage({ portfolio, loading, loadError, user, onAdminSignIn, onS
         <button className="command-trigger" onClick={() => setCommandOpen(true)} aria-label="Open quick navigation" title="Quick navigation (Ctrl or Command + K)">
           <Search size={16} /><span>Quick find</span><kbd><Command size={11} /> K</kbd>
         </button>
+        <button type="button" className="header-logout" onClick={onSignOut} disabled={signingOut}><LogOut size={14} /> {signingOut ? 'Signing out...' : 'Sign out'}</button>
       </header>
 
       <section className="hero section-wrap" id="home" aria-labelledby="hero-title">
@@ -1041,7 +1121,7 @@ function ProjectCard({ project, index }) {
   );
 }
 
-function Admin() {
+function Admin({ onSignOut, signingOut }) {
   const [user, setUser] = useState(null);
   const [login, setLogin] = useState({ username: '', password: '' });
   const [portfolio, setPortfolio] = useState(emptyPortfolio);
@@ -1135,11 +1215,6 @@ function Admin() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function signOut() {
-    await api('/api/admin/logout', { method: 'POST' });
-    setUser(null);
   }
 
   async function resetAnalytics() {
@@ -1271,7 +1346,7 @@ function Admin() {
 
   return (
     <main className="admin-shell">
-      <header className="admin-header"><a className="wordmark" href="/"><span>EN</span><i>.</i></a><div className="admin-header-title"><span>PORTFOLIO / CONTROL ROOM</span><b>{getKenyanGreeting()}, {user}.</b></div><button className="admin-logout" onClick={signOut}><LogOut size={15} /> Sign out</button></header>
+      <header className="admin-header"><a className="wordmark" href="/"><span>EN</span><i>.</i></a><div className="admin-header-title"><span>PORTFOLIO / CONTROL ROOM</span><b>{getKenyanGreeting()}, {user}.</b></div><button type="button" className="admin-logout" onClick={onSignOut} disabled={signingOut}><LogOut size={15} /> {signingOut ? 'Signing out...' : 'Sign out'}</button></header>
       <div className="admin-layout">
         <aside className="admin-sidebar"><span className="sidebar-label">WORKSPACE</span><button className={tab === 'content' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('content')}><Layers3 size={17} /> Portfolio <ArrowRight size={14} /></button><button className={tab === 'messages' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('messages')}><MessageSquareText size={17} /> Messages <span className="message-count">{messages.length}</span></button><button className={tab === 'analytics' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('analytics')}><BarChart3 size={17} /> Analytics <ArrowRight size={14} /></button><button className={tab === 'users' ? 'sidebar-tab active' : 'sidebar-tab'} onClick={() => setTab('users')}><Users size={17} /> Users <span className="message-count">{registeredUsers.length}</span></button><div className="sidebar-bottom"><ShieldCheck size={17} /><span>Private admin access<br /><b>Session protected</b></span></div></aside>
         <section className="admin-main">
