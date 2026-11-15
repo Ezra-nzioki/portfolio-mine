@@ -11,7 +11,7 @@ import geoip from 'geoip-lite';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import multer from 'multer';
-import { Resend } from 'resend';
+import { isEmailDeliveryConfigured, sendEmail } from './utils/sendEmail.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '.env') });
@@ -282,76 +282,7 @@ function setVisitorSession(req, res, userId, provider = 'email') {
 }
 
 function getEmailProvider() {
-  return process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'resend';
-}
-
-function isResendConfigured() {
-  if (!process.env.RESEND_API_KEY?.trim() || !process.env.EMAIL_FROM?.trim()) return false;
-  const ownerEmail = process.env.EMAIL_USER?.trim() || '';
-  return !isResendSandboxSender() || emailAddressPattern.test(ownerEmail);
-}
-
-function isResendSandboxSender() {
-  const configuredFrom = process.env.EMAIL_FROM?.trim() || '';
-  const senderAddress = configuredFrom.match(/<([^>]+)>/)?.[1] || configuredFrom;
-  return senderAddress.trim().toLowerCase().endsWith('@resend.dev');
-}
-
-function isEmailDeliveryConfigured() {
-  return getEmailProvider() === 'resend' && isResendConfigured();
-}
-
-async function deliverEmail(message) {
-  const provider = getEmailProvider();
-  if (!isEmailDeliveryConfigured()) {
-    const error = new Error('Email delivery is not configured.');
-    error.responseCode = 503;
-    error.provider = provider;
-    throw error;
-  }
-
-  const ownerEmail = process.env.EMAIL_USER?.trim().toLowerCase();
-  const requestedEmail = message.to.trim().toLowerCase();
-  const routedToOwner = isResendSandboxSender() && ownerEmail !== requestedEmail;
-  const recipient = routedToOwner ? ownerEmail : message.to;
-  const routingNote = routedToOwner
-    ? `\n\nThis test code was requested for ${message.to}. Share it with that user to complete verification.`
-    : '';
-  const routingNoteHtml = routedToOwner
-    ? `<p>This test code was requested for ${message.to.replace(/[&<>"']/g, (character) => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    })[character])}. Share it with that user to complete verification.</p>`
-    : '';
-
-  try {
-    const resend = new Resend(process.env.RESEND_API_KEY.trim());
-    const { error: resendError } = await resend.emails.send({
-      from: process.env.EMAIL_FROM.trim(),
-      to: [recipient],
-      subject: message.subject,
-      text: `${message.text}${routingNote}`,
-      html: `${message.html}${routingNoteHtml}`,
-    }, { signal: AbortSignal.timeout(10000) });
-    if (resendError) {
-      const error = new Error(resendError.message || 'Resend rejected the email request.', { cause: resendError });
-      error.provider = provider;
-      error.responseCode = resendError.statusCode;
-      error.code = resendError.name || 'RESEND_API_ERROR';
-      throw error;
-    }
-  } catch (cause) {
-    if (cause?.provider === provider) throw cause;
-    const error = new Error('Could not connect to the Resend API.', { cause });
-    error.provider = provider;
-    error.code = cause.code || cause.cause?.code;
-    throw error;
-  }
-
-  return { routedToOwner };
+  return process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'brevo';
 }
 
 function hashEmailCode(userId, email, purpose, code) {
@@ -374,9 +305,9 @@ async function sendEmailCode(user, purpose) {
     user.emailCodePurpose = purpose;
   }
   try {
-    return await deliverEmail({
+    return await sendEmail({
       to: user.email,
-      subject: purpose === 'password-reset' ? 'Your password reset code' : 'Your email verification code',
+      subject: purpose === 'password-reset' ? 'Your password reset code' : 'Your Email Verification Code',
       text: `Your verification code is ${code}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
       html: `<p>Your verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes. If you did not request this, you can ignore this email.</p>`,
     });
@@ -397,22 +328,22 @@ async function sendEmailCode(user, purpose) {
 function getEmailDeliveryErrorMessage(error) {
   const provider = error?.provider || getEmailProvider();
   if (error?.responseCode === 503) {
-    if (provider === 'resend') {
-      return 'Resend email delivery is not configured. Set EMAIL_PROVIDER=resend, RESEND_API_KEY, and EMAIL_FROM in the backend environment. EMAIL_USER is also required when using a resend.dev sandbox sender.';
+    if (provider === 'brevo') {
+      return 'Brevo email delivery is not configured. Set EMAIL_PROVIDER=brevo, BREVO_API_KEY, and EMAIL_FROM in the backend environment.';
     }
-    return 'The EMAIL_PROVIDER setting is unsupported. Set it to resend.';
+    return 'The EMAIL_PROVIDER setting is unsupported. Set it to brevo.';
   }
-  if (provider === 'resend') {
+  if (provider === 'brevo') {
     if ([401, 403].includes(Number(error?.responseCode))) {
-      return 'Resend rejected the API key or sender. Check RESEND_API_KEY and EMAIL_FROM in the backend environment.';
+      return 'Brevo rejected the API key or sender. Check BREVO_API_KEY and EMAIL_FROM in the backend environment.';
     }
     if (Number(error?.responseCode) === 429) {
-      return 'Resend rate-limited the email request. Check your Resend account limits and try again later.';
+      return 'Brevo rate-limited the email request. Check your Brevo account limits and try again later.';
     }
     if (error?.responseCode) {
-      return 'Resend rejected the email request. Check the sender address and Resend account status.';
+      return 'Brevo rejected the email request. Check the sender address and Brevo account status.';
     }
-    return 'The backend could not connect to the Resend API over HTTPS. Check the backend host’s outbound HTTPS access and review its logs for the connection error.';
+    return 'The backend could not connect to the Brevo API over HTTPS. Check the backend host’s outbound HTTPS access and review its logs for the connection error.';
   }
   return 'The configured email provider could not deliver the message. Check the provider settings in the production backend environment and review backend logs for the error code.';
 }
@@ -632,9 +563,8 @@ authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireD
         memoryUsers.set(memoryAccount._id, memoryAccount);
         return memoryAccount;
       })();
-    let delivery;
     try {
-      delivery = await sendEmailCode(account, 'registration');
+      await sendEmailCode(account, 'registration');
     } catch (error) {
       console.error('Email registration code delivery failed:', {
         provider: error.provider || getEmailProvider(),
@@ -645,10 +575,9 @@ authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireD
       else memoryUsers.delete(account._id.toString());
       return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
     }
-    const message = delivery.routedToOwner
-      ? `A test verification code for ${email} was sent to the site owner. Ask the site owner for the code to finish registration.`
-      : 'A verification code has been sent to your email address.';
-    return res.status(201).json({ message });
+    return res.status(201).json({
+      message: 'A verification code has been sent to your email address.',
+    });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ error: 'An account with this email or phone number already exists.' });
     return next(error);
@@ -667,13 +596,8 @@ app.post('/api/auth/email/send-code', limitAuthAttempts, requireDatabase, async 
     const account = mongoose.connection.readyState === 1
       ? await EmailAccount.findOne({ email })
       : [...memoryUsers.values()].find((user) => user.email === email);
-    const delivery = account
-      ? await sendEmailCode(account, account.emailVerified === false ? 'registration' : 'login')
-      : null;
-    const message = delivery?.routedToOwner
-      ? 'If an account exists for that email, its test sign-in code was sent to the site owner. Ask the site owner for the code.'
-      : 'If an account exists for that email, a sign-in code has been sent.';
-    return res.json({ message });
+    if (account) await sendEmailCode(account, account.emailVerified === false ? 'registration' : 'login');
+    return res.json({ message: 'If an account exists for that email, a sign-in code has been sent.' });
   } catch (error) {
     console.error('Email sign-in code delivery failed:', {
       provider: error.provider || getEmailProvider(),
@@ -768,14 +692,10 @@ app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async 
     const user = mongoose.connection.readyState === 1
       ? await EmailAccount.findOne({ email, emailVerified: true })
       : [...memoryUsers.values()].find((account) => account.email === email && account.emailVerified !== false);
-    let delivery;
     if (user) {
-      delivery = await sendEmailCode(user, 'password-reset');
+      await sendEmailCode(user, 'password-reset');
     }
-    const message = delivery?.routedToOwner
-      ? 'If a verified account exists for that email, its test password reset code was sent to the site owner. Ask the site owner for the code.'
-      : 'If a verified account exists for that email, a password reset code has been sent.';
-    return res.json({ message });
+    return res.json({ message: 'If a verified account exists for that email, a password reset code has been sent.' });
   } catch (error) {
     console.error('Email password recovery delivery failed:', {
       provider: error.provider || getEmailProvider(),

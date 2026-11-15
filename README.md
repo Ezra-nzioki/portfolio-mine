@@ -30,37 +30,27 @@ Use [`backend/.env.example`](./backend/.env.example) for local development. For 
 
 Visitors register with a username, email address, and password; a phone number can optionally be saved to the account. Registration verification, email-code sign-in, and password recovery send a generated six-digit code through the configured email provider. Codes expire after 10 minutes, are stored as purpose-bound hashes, and can be used once. Passwords and codes are not stored in plaintext.
 
-For production, use Resend's HTTPS API rather than SMTP, which some backend hosts block. Verify a sending domain in Resend, create an API key, then set these variables in the backend host's environment:
+For production, send email through Brevo's transactional HTTPS API (port 443); no SMTP configuration or extra SDK is required. Verify `ezranzioki@gmail.com` as a sender in Brevo, create a transactional API key, then set these variables in the backend host's environment:
 
 | Variable | Value |
 |---|---|
-| `EMAIL_PROVIDER` | Set to `resend` |
-| `RESEND_API_KEY` | Resend API key; keep it private |
-| `EMAIL_FROM` | Sender using the verified domain, such as `Ezra Nzioki <no-reply@example.com>` |
+| `EMAIL_PROVIDER` | `brevo` |
+| `BREVO_API_KEY` | Brevo API key; keep it private |
+| `EMAIL_FROM` | Verified sender address, such as `ezranzioki@gmail.com` |
 
 For local development, add these to `backend/.env`:
 
 ```env
-EMAIL_PROVIDER=resend
-RESEND_API_KEY=re_your_api_key
-EMAIL_FROM=Ezra Nzioki <no-reply@example.com>
+EMAIL_PROVIDER=brevo
+BREVO_API_KEY=xkeysib-your-api-key
+EMAIL_FROM=ezranzioki@gmail.com
 ```
 
-The sender domain in `EMAIL_FROM` must be verified with Resend. For local testing, Resend's test sender can only deliver to the account owner's email; verify your own domain to send to other recipients. To keep using SMTP instead, set `EMAIL_PROVIDER=smtp`, `EMAIL_USER`, and `EMAIL_PASS`. For a custom SMTP provider, also set its connection details:
-
-```env
-EMAIL_PROVIDER=smtp
-EMAIL_USER=your-smtp-username
-EMAIL_PASS=your-smtp-password
-EMAIL_HOST=smtp.example.com
-EMAIL_PORT=587
-EMAIL_SECURE=false
-EMAIL_FROM=your-verified-sender@example.com
-```
+The sender address must be verified in Brevo. Verification, sign-in, and password-reset codes are sent directly to the requested email address and expire after 10 minutes.
 
 Keep all email credentials on the backend only; never put them in the client environment. With `MONGODB_URI` configured, accounts are stored in `emailaccounts`; without MongoDB, account data is temporary and is lost when the backend restarts. Usernames, email addresses, optional phone numbers, IP addresses, and approximate locations are retained until an admin deletes the account.
 
-If delivery fails in production, check the backend host's environment settings (the ignored local `backend/.env` is not deployed), confirm that `EMAIL_FROM` is on a verified Resend domain, then redeploy the latest backend source.
+If delivery fails in production, check the backend host's environment settings (the ignored local `backend/.env` is not deployed), confirm that the Brevo API key is valid and `EMAIL_FROM` is a verified sender, then redeploy the latest backend source.
 
 ## MongoDB persistence
 
