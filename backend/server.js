@@ -11,7 +11,7 @@ import geoip from 'geoip-lite';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import multer from 'multer';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '.env') });
@@ -281,66 +281,24 @@ function setVisitorSession(req, res, userId, provider = 'email') {
   });
 }
 
-let emailTransporter;
-
 function getEmailProvider() {
-  return process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'smtp';
+  return process.env.EMAIL_PROVIDER?.trim().toLowerCase() || 'resend';
 }
 
 function isResendConfigured() {
-  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim());
+  if (!process.env.RESEND_API_KEY?.trim() || !process.env.EMAIL_FROM?.trim()) return false;
+  const ownerEmail = process.env.EMAIL_USER?.trim() || '';
+  return !isResendSandboxSender() || emailAddressPattern.test(ownerEmail);
 }
 
-function isSmtpConfigured() {
-  return Boolean(process.env.EMAIL_USER?.trim() && process.env.EMAIL_PASS?.trim());
+function isResendSandboxSender() {
+  const configuredFrom = process.env.EMAIL_FROM?.trim() || '';
+  const senderAddress = configuredFrom.match(/<([^>]+)>/)?.[1] || configuredFrom;
+  return senderAddress.trim().toLowerCase().endsWith('@resend.dev');
 }
 
 function isEmailDeliveryConfigured() {
-  if (getEmailProvider() === 'resend') {
-    return isResendConfigured();
-  }
-  if (getEmailProvider() === 'smtp') {
-    return isSmtpConfigured();
-  }
-  return false;
-}
-
-function getEmailTransporter() {
-  const user = process.env.EMAIL_USER?.trim();
-  const pass = process.env.EMAIL_PASS?.trim();
-  if (!user || !pass) return null;
-  if (emailTransporter) return emailTransporter;
-  const host = process.env.EMAIL_HOST?.trim();
-  const port = Number(process.env.EMAIL_PORT) || 587;
-  emailTransporter = nodemailer.createTransport({
-    ...(host ? { host, port, secure: process.env.EMAIL_SECURE === 'true' || port === 465 } : { service: 'gmail' }),
-    auth: { user, pass },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
-  });
-  return emailTransporter;
-}
-
-async function deliverEmailWithSmtp(message) {
-  const transporter = getEmailTransporter();
-  if (!transporter) {
-    const error = new Error('SMTP email delivery is not configured.');
-    error.responseCode = 503;
-    error.provider = 'smtp';
-    throw error;
-  }
-
-  const configuredFrom = process.env.EMAIL_FROM?.trim();
-  const from = configuredFrom?.toLowerCase().includes('@resend.dev')
-    ? process.env.EMAIL_USER.trim()
-    : configuredFrom || process.env.EMAIL_USER.trim();
-  try {
-    await transporter.sendMail({ from, ...message });
-  } catch (error) {
-    error.provider = 'smtp';
-    throw error;
-  }
+  return getEmailProvider() === 'resend' && isResendConfigured();
 }
 
 async function deliverEmail(message) {
@@ -352,42 +310,48 @@ async function deliverEmail(message) {
     throw error;
   }
 
-  if (provider === 'resend') {
-    let response;
-    try {
-      response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.RESEND_API_KEY.trim()}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: process.env.EMAIL_FROM.trim(),
-          to: [message.to],
-          subject: message.subject,
-          text: message.text,
-          html: message.html,
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch (cause) {
-      const error = new Error('Could not connect to the Resend API.', { cause });
-      error.provider = provider;
-      error.code = cause.code || cause.cause?.code;
-      throw error;
-    }
+  const ownerEmail = process.env.EMAIL_USER?.trim().toLowerCase();
+  const requestedEmail = message.to.trim().toLowerCase();
+  const routedToOwner = isResendSandboxSender() && ownerEmail !== requestedEmail;
+  const recipient = routedToOwner ? ownerEmail : message.to;
+  const routingNote = routedToOwner
+    ? `\n\nThis test code was requested for ${message.to}. Share it with that user to complete verification.`
+    : '';
+  const routingNoteHtml = routedToOwner
+    ? `<p>This test code was requested for ${message.to.replace(/[&<>"']/g, (character) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[character])}. Share it with that user to complete verification.</p>`
+    : '';
 
-    if (!response.ok) {
-      const error = new Error(`Resend rejected the email request with status ${response.status}.`);
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY.trim());
+    const { error: resendError } = await resend.emails.send({
+      from: process.env.EMAIL_FROM.trim(),
+      to: [recipient],
+      subject: message.subject,
+      text: `${message.text}${routingNote}`,
+      html: `${message.html}${routingNoteHtml}`,
+    }, { signal: AbortSignal.timeout(10000) });
+    if (resendError) {
+      const error = new Error(resendError.message || 'Resend rejected the email request.', { cause: resendError });
       error.provider = provider;
-      error.responseCode = response.status;
-      error.code = `RESEND_HTTP_${response.status}`;
+      error.responseCode = resendError.statusCode;
+      error.code = resendError.name || 'RESEND_API_ERROR';
       throw error;
     }
-    return;
+  } catch (cause) {
+    if (cause?.provider === provider) throw cause;
+    const error = new Error('Could not connect to the Resend API.', { cause });
+    error.provider = provider;
+    error.code = cause.code || cause.cause?.code;
+    throw error;
   }
 
-  await deliverEmailWithSmtp(message);
+  return { routedToOwner };
 }
 
 function hashEmailCode(userId, email, purpose, code) {
@@ -410,7 +374,7 @@ async function sendEmailCode(user, purpose) {
     user.emailCodePurpose = purpose;
   }
   try {
-    await deliverEmail({
+    return await deliverEmail({
       to: user.email,
       subject: purpose === 'password-reset' ? 'Your password reset code' : 'Your email verification code',
       text: `Your verification code is ${code}. It expires in 10 minutes. If you did not request this, you can ignore this email.`,
@@ -434,35 +398,23 @@ function getEmailDeliveryErrorMessage(error) {
   const provider = error?.provider || getEmailProvider();
   if (error?.responseCode === 503) {
     if (provider === 'resend') {
-      return 'Resend email delivery is not configured. Set EMAIL_PROVIDER=resend, RESEND_API_KEY, and EMAIL_FROM in the backend environment.';
+      return 'Resend email delivery is not configured. Set EMAIL_PROVIDER=resend, RESEND_API_KEY, and EMAIL_FROM in the backend environment. EMAIL_USER is also required when using a resend.dev sandbox sender.';
     }
-    if (provider === 'smtp') {
-      return 'SMTP email delivery is not configured. Set EMAIL_USER and EMAIL_PASS in the backend environment.';
-    }
-    return 'The EMAIL_PROVIDER setting is unsupported. Set it to resend or smtp.';
+    return 'The EMAIL_PROVIDER setting is unsupported. Set it to resend.';
   }
   if (provider === 'resend') {
     if ([401, 403].includes(Number(error?.responseCode))) {
-      return 'Resend rejected the API key or sender. Check RESEND_API_KEY and make sure EMAIL_FROM uses a sender on a verified Resend domain.';
+      return 'Resend rejected the API key or sender. Check RESEND_API_KEY and EMAIL_FROM in the backend environment.';
     }
     if (Number(error?.responseCode) === 429) {
       return 'Resend rate-limited the email request. Check your Resend account limits and try again later.';
     }
     if (error?.responseCode) {
-      return 'Resend rejected the email request. Check the sender address, recipient restrictions, and Resend account status.';
+      return 'Resend rejected the email request. Check the sender address and Resend account status.';
     }
     return 'The backend could not connect to the Resend API over HTTPS. Check the backend host’s outbound HTTPS access and review its logs for the connection error.';
   }
-  if (error?.code === 'EAUTH' || [534, 535].includes(Number(error?.responseCode))) {
-    return 'The SMTP provider rejected the login. Check EMAIL_USER and EMAIL_PASS in the backend environment.';
-  }
-  if (['ETIMEDOUT', 'ECONNECTION', 'ESOCKET', 'EDNS', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'EHOSTUNREACH'].includes(error?.code)) {
-    return 'The backend could not connect to the SMTP host. Check EMAIL_HOST, EMAIL_PORT, and the backend host’s outbound email restrictions; if SMTP is blocked, use EMAIL_PROVIDER=resend with the Resend HTTPS API.';
-  }
-  if ([550, 553].includes(Number(error?.responseCode))) {
-    return 'The SMTP provider rejected the sender address. Set EMAIL_FROM to the authenticated or provider-verified sender address.';
-  }
-  return 'The email provider could not deliver the message. Check the provider settings in the production backend environment and review backend logs for the error code.';
+  return 'The configured email provider could not deliver the message. Check the provider settings in the production backend environment and review backend logs for the error code.';
 }
 
 function requireDatabase(req, res, next) {
@@ -680,8 +632,9 @@ authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireD
         memoryUsers.set(memoryAccount._id, memoryAccount);
         return memoryAccount;
       })();
+    let delivery;
     try {
-      await sendEmailCode(account, 'registration');
+      delivery = await sendEmailCode(account, 'registration');
     } catch (error) {
       console.error('Email registration code delivery failed:', {
         provider: error.provider || getEmailProvider(),
@@ -692,7 +645,10 @@ authRouter.post(['/api/auth/register', '/register'], limitAuthAttempts, requireD
       else memoryUsers.delete(account._id.toString());
       return res.status(error.responseCode === 503 ? 503 : 502).json({ error: getEmailDeliveryErrorMessage(error) });
     }
-    return res.status(201).json({ message: 'A verification code has been sent to your email address.' });
+    const message = delivery.routedToOwner
+      ? `A test verification code for ${email} was sent to the site owner. Ask the site owner for the code to finish registration.`
+      : 'A verification code has been sent to your email address.';
+    return res.status(201).json({ message });
   } catch (error) {
     if (error.code === 11000) return res.status(409).json({ error: 'An account with this email or phone number already exists.' });
     return next(error);
@@ -711,8 +667,13 @@ app.post('/api/auth/email/send-code', limitAuthAttempts, requireDatabase, async 
     const account = mongoose.connection.readyState === 1
       ? await EmailAccount.findOne({ email })
       : [...memoryUsers.values()].find((user) => user.email === email);
-    if (account) await sendEmailCode(account, account.emailVerified === false ? 'registration' : 'login');
-    return res.json({ message: 'If an account exists for that email, a sign-in code has been sent.' });
+    const delivery = account
+      ? await sendEmailCode(account, account.emailVerified === false ? 'registration' : 'login')
+      : null;
+    const message = delivery?.routedToOwner
+      ? 'If an account exists for that email, its test sign-in code was sent to the site owner. Ask the site owner for the code.'
+      : 'If an account exists for that email, a sign-in code has been sent.';
+    return res.json({ message });
   } catch (error) {
     console.error('Email sign-in code delivery failed:', {
       provider: error.provider || getEmailProvider(),
@@ -807,10 +768,14 @@ app.post('/api/auth/forgot-password', limitAuthAttempts, requireDatabase, async 
     const user = mongoose.connection.readyState === 1
       ? await EmailAccount.findOne({ email, emailVerified: true })
       : [...memoryUsers.values()].find((account) => account.email === email && account.emailVerified !== false);
+    let delivery;
     if (user) {
-      await sendEmailCode(user, 'password-reset');
+      delivery = await sendEmailCode(user, 'password-reset');
     }
-    return res.json({ message: 'If a verified account exists for that email, a password reset code has been sent.' });
+    const message = delivery?.routedToOwner
+      ? 'If a verified account exists for that email, its test password reset code was sent to the site owner. Ask the site owner for the code.'
+      : 'If a verified account exists for that email, a password reset code has been sent.';
+    return res.json({ message });
   } catch (error) {
     console.error('Email password recovery delivery failed:', {
       provider: error.provider || getEmailProvider(),
